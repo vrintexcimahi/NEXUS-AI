@@ -1,9 +1,0 @@
-services:
-  nexus-ai:
-    build: .
-    container_name: nexus_gpt_server
-    ports:
-      - "8888:80"
-    volumes:
-      - ./server:/var/www/html/server
-    restart: always
