@@ -6,7 +6,7 @@ header('Access-Control-Allow-Headers: Content-Type');
 
 try {
     // --- DATABASE CONFIGURATION ---
-    $dbFile = __DIR__ . '/nexus_gpt.db';
+    $dbFile = '/tmp/nexus_gpt.db';
     $db = new PDO("sqlite:$dbFile");
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 

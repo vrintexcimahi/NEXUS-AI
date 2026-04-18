@@ -3,7 +3,7 @@ header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 
 try {
-    $dbFile = __DIR__ . '/nexus_gpt.db';
+    $dbFile = '/tmp/nexus_gpt.db';
     $db = new PDO("sqlite:$dbFile");
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     
