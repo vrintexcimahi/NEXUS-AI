@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>N.E.X.U.S GPT AI</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="./extracted_icons/icon32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="./extracted_icons/icon48.png" />
+    <link rel="icon" type="image/png" sizes="64x64" href="./extracted_icons/icon64.png" />
+    <link rel="icon" type="image/png" sizes="96x96" href="./extracted_icons/icon96.png" />
+    <link rel="icon" type="image/png" sizes="128x128" href="./extracted_icons/icon128.png" />
+    <link rel="icon" type="image/png" sizes="256x256" href="./extracted_icons/icon256.png" />
+    <link rel="icon" type="image/png" sizes="500x500" href="./extracted_icons/icon500.png" />
+    
+    <link rel="stylesheet" href="css/style.css?v=nexus_ultra_v2" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+    <script src="js/script.js?v=nexus_ultra_v2" defer></script>
+  </head>
+  <body>
+    <!-- Context Menu for Chat History -->
+    <div id="chatContextMenu">
+      <div class="context-item" id="togglePinChatMenuItem" onclick="togglePinCurrentChat()"><i class="fa-solid fa-thumbtack"></i> <span id="togglePinChatMenuLabel">Pin Chat</span></div>
+      <div class="context-item" onclick="renameCurrentChat()"><i class="fa-solid fa-pencil"></i> Rename</div>
+      <div class="context-item" onclick="shareCurrentChat()"><i class="fa-solid fa-share-nodes"></i> Share</div>
+      <div class="context-item" onclick="downloadCurrentChat()"><i class="fa-solid fa-file-word"></i> Download .DOC</div>
+      <div class="context-item" onclick="downloadCurrentChatPdf()"><i class="fa-solid fa-file-pdf"></i> Download PDF</div>
+      <div class="context-item destructive" onclick="deleteCurrentChat()"><i class="fa-solid fa-trash-can"></i> Delete</div>
+    </div>
+
+    <div id="notification-container"></div>
+    <canvas id="matrixCanvas" class="matrix-rain-layer"></canvas>
+
+    <!-- Restored Login Screen -->
+    <div id="login-screen">
+        <canvas id="loginMatrixCanvas" class="matrix-rain-layer login-matrix"></canvas>
+        <div class="login-card">
+            <div class="login-logo"><img src="./extracted_icons/icon128.png" alt="NEXUS"></div>
+            <div class="brand-name">N.E.X.U.S GPT AI</div>
+            
+            <div class="login-tabs">
+                <button class="login-tab active" id="tab-login" onclick="switchLoginTab('login')">LOGIN</button>
+                <button class="login-tab" id="tab-register" onclick="switchLoginTab('register')">REGISTER</button>
+            </div>
+
+            <form class="login-form" id="loginForm">
+                <div class="input-wrapper">
+                    <input type="text" id="login_username" class="login-input" placeholder="USERNAME" autocomplete="off">
+                </div>
+                
+                <div id="regFields" style="display:none; flex-direction:column; gap:15px;">
+                    <div class="input-wrapper">
+                        <input type="email" id="regEmail" class="login-input" placeholder="EMAIL ADDRESS">
+                    </div>
+                    <div class="input-wrapper">
+                        <input type="text" id="regPhone" class="login-input" placeholder="PHONE NUMBER">
+                    </div>
+                </div>
+
+                <div class="input-wrapper has-toggle">
+                    <input type="password" id="login_password" class="login-input" placeholder="PASSWORD">
+                    <i class="fa-solid fa-eye-slash toggle-pass" id="toggleLoginPass" onclick="togglePass('login_password', 'toggleLoginPass')"></i>
+                </div>
+                
+                <button id="loginSubmitBtn" class="login-btn" type="submit">STABLISH CONNECTION</button>
+                <div id="loginError">ACCESS DENIED</div>
+                <div id="loginStatus">AWAITING AUTHORIZATION...</div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Dashboard Container -->
+    <div class="app-container" id="mainDashboard">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <h2><img src="./extracted_icons/icon32.png" alt="NEXUS" style="width: 1.2em; height: 1.2em; vertical-align: middle;"> N.E.X.U.S</h2>
+          <div style="display:flex; gap:8px;">
+            <button id="hardRefreshBtn" class="icon-btn" title="Total Hard Refresh" onclick="hardResetApp()"><i class="fa-solid fa-sync"></i></button>
+            <button id="closeSidebarBtn" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </div>
+        <div class="sidebar-menu">
+          <button id="newChatBtn" class="menu-btn primary"><i class="fa-solid fa-plus"></i> <span>New Chat</span></button>
+          <button id="groupChatSidebarBtn" class="menu-btn" onclick="toggleGroupChat()"><i class="fa-solid fa-comments"></i> <span>Group Chat</span> <span class="badge-new">New</span></button>
+          <div id="historyList" class="history-list">
+             <!-- Chats loaded here -->
+          </div>
+          <div id="historyShowMoreContainer" style="display:none; text-align:center; padding:5px 10px; margin-bottom:5px;">
+            <button id="toggleHistoryBtn" class="small-btn" style="background:rgba(0,243,255,0.05); border:1px solid rgba(0,243,255,0.1); color:var(--neon-blue); font-size:0.65rem; width:100%; border-radius:4px; padding:4px; cursor:pointer;" onclick="toggleHistoryExpansion()">SHOW MORE</button>
+          </div>
+          <div class="sidebar-utility-actions">
+            <button id="apiConfigSidebarBtn" class="menu-btn admin-only-tab" onclick="document.getElementById('settingsModal').classList.add('active'); switchDashTab('api');"><i class="fa-solid fa-network-wired"></i> <span>API Config</span></button>
+            <button id="jailbreakSidebarBtn" class="menu-btn admin-only-tab" onclick="document.getElementById('settingsModal').classList.add('active'); switchDashTab('jailbreak');"><i class="fa-solid fa-user-ninja"></i> <span>Jailbreak Manager</span></button>
+            <button id="userManagerSidebarBtn" class="menu-btn admin-only-tab" onclick="document.getElementById('settingsModal').classList.add('active'); switchDashTab('users');"><i class="fa-solid fa-users-gear"></i> <span>User Manager</span></button>
+            <button id="chatMonitorSidebarBtn" class="menu-btn admin-only-tab" onclick="document.getElementById('settingsModal').classList.add('active'); switchDashTab('monitor');"><i class="fa-solid fa-desktop"></i> <span>Chat Monitor</span></button>
+            <button id="systemLogsSidebarBtn" class="menu-btn admin-only-tab" onclick="document.getElementById('settingsModal').classList.add('active'); switchDashTab('logs');"><i class="fa-solid fa-terminal"></i> <span>System Logs</span></button>
+            <button id="userReportMenuBtn" class="menu-btn" onclick="openReportModal()"><i class="fa-solid fa-bullhorn"></i> <span>User Report</span></button>
+            <button id="settingsBtn" class="menu-btn"><i class="fa-solid fa-gear"></i> <span>Settings</span></button>
+            <button id="lastUpdateMenuBtn" class="menu-btn" onclick="window.openLastUpdateModal()"><i id="syncIcon" class="fa-solid fa-arrows-rotate"></i> <span>Sync: <b id="lastUpdateSpan" style="color:var(--neon-blue); font-family:var(--font-code); font-weight:normal;">Just now</b></span></button>
+          </div>
+        </div>
+        <div class="sidebar-footer">
+          <p class="sidebar-meta-line">AI Engine: UNCENSORED  Dev: IYAN</p>
+          <p class="matrix-status">STATUS: ONLINE 🟢</p>
+          
+          <div class="sidebar-user-box" id="userProfileBox">
+             <div class="user-info-name"><i class="fa-solid fa-circle-user"></i> <span id="sidebarUserName">GUEST</span> <span id="sidebarUserRole" style="font-size:0.5rem; opacity:0.6; margin-left:5px;"></span></div>
+             <div class="user-info-detail" id="sidebarUserEmail">---</div>
+             <div class="user-info-detail" id="sidebarUserPhone">---</div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="chat-area">
+        <canvas id="chatMatrixCanvas" class="matrix-rain-layer chat-matrix"></canvas>
+        <header class="chat-header">
+          <button id="openSidebarBtn" class="icon-btn"><i class="fa-solid fa-bars"></i></button>
+          <div class="header-title">
+            <span class="model-name">N.E.X.U.S GPT AI</span>
+            <span class="version-badge">v8.0</span>
+          </div>
+          <div class="header-actions">
+            <button id="musicToggleBtn" class="icon-btn music-btn" title="Toggle Music" onclick="toggleNexusMusic()"><i class="fa-solid fa-play"></i></button>
+            <button id="logoutBtn" class="icon-btn" title="Logout" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i></button>
+          </div>
+        </header>
+
+        <div class="messages-container" id="messagesContainer">
+          <div class="message system-msg">
+            <div class="msg-content">
+              [ Next-Gen Intelligence System - N.E.X.U.S ]<br />
+              <span id="systemWelcomeTicker" class="bilingual-marquee bilingual-system-line"></span><br />
+              Awaiting your command...
+            </div>
+          </div>
+        </div>
+
+        <!-- Group Chat Container -->
+        <div class="group-chat-container" id="groupChatContainer" style="display:none;">
+          <div id="groupChatLogin" class="group-login-overlay">
+            <div class="group-login-card">
+              <i class="fa-solid fa-users-viewfinder login-icon"></i>
+              <h3>NEXUS GLOBAL PULSE</h3>
+              <p>Join the collective intelligence stream. Identify yourself.</p>
+              <div class="input-wrapper">
+                <input type="text" id="groupChatNameInput" class="group-input" placeholder="OPERATIVE ALIAS" maxlength="20">
+              </div>
+              <div class="input-wrapper">
+                <select id="groupChatProvinceInput" class="group-input">
+                  <option value="" disabled selected>SECTOR / PROVINCE</option>
+                </select>
+              </div>
+              <p id="groupLoginError" class="error-text"></p>
+              <button class="join-btn" onclick="joinGroupChat()">ESTABLISH CONNECTION</button>
+            </div>
+          </div>
+
+          <div id="groupChatMain" class="group-chat-main" style="display:none;">
+            <div class="group-header">
+              <div class="group-info">
+                <i class="fa-solid fa-circle-nodes"></i>
+                <div>
+                  <div class="group-title">GLOBAL PULSE</div>
+                  <div id="groupUserStatus" class="user-status">SYNCING...</div>
+                </div>
+              </div>
+              <button class="logout-group-btn" title="Leave Pulse" onclick="logoutGroupChat()">
+                <i class="fa-solid fa-right-from-bracket"></i>
+              </button>
+            </div>
+            
+            <div id="groupMessages" class="group-messages">
+              <!-- Messages load here -->
+            </div>
+
+            <div class="group-input-area">
+              <form id="groupMessageForm" onsubmit="sendGroupMessage(event)">
+                <input type="text" id="groupMessageInput" placeholder="TRANSMIT MESSAGE TO PULSE..." autocomplete="off">
+                <button type="submit" id="groupSendBtn">
+                  <i class="fa-solid fa-paper-plane"></i>
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div class="input-area-wrapper">
+          <!-- File Preview Container -->
+          <div id="filePreviewContainer" class="file-preview-container" style="display:none;"></div>
+          
+          <div class="input-area">
+            <!-- Brand Logo Icon -->
+            <div class="nexus-logo-input-btn" title="N.E.X.U.S Core Identity">
+              <img src="./extracted_icons/icon500.png" alt="NEXUS">
+            </div>
+
+            <!-- Action Trigger (+) -->
+            <button id="actionTriggerBtn" class="plus-trigger-btn" title="Multimedia & Actions" onclick="toggleActionMenu(event)">
+              <i class="fa-solid fa-plus"></i>
+            </button>
+
+            <!-- Action Menu -->
+            <div id="actionMenu" class="action-menu">
+              <div class="action-menu-item" onclick="triggerFileUpload()">
+                <i class="fa-solid fa-paperclip"></i>
+                <span>Upload photos & files</span>
+              </div>
+              <div class="action-menu-item" onclick="showNotification('Image generation coming soon...', 'info')">
+                <i class="fa-solid fa-image"></i>
+                <span>Create image</span>
+              </div>
+              <div class="action-menu-item" onclick="toggleThinkingMode()">
+                <i class="fa-solid fa-lightbulb"></i>
+                <span>Thinking</span>
+                <span id="thinkingStatus" class="thinking-tag">ACTIVE</span>
+              </div>
+              <div class="action-menu-item" onclick="showNotification('Deep Research requires premium access.', 'info')">
+                <i class="fa-solid fa-telescope"></i>
+                <span>Deep research</span>
+              </div>
+              <div class="action-menu-item">
+                <i class="fa-solid fa-ellipsis"></i>
+                <span>More</span>
+                <i class="fa-solid fa-chevron-right" style="margin-left:auto; font-size:0.7rem"></i>
+              </div>
+            </div>
+
+            <input type="file" id="hiddenFileInput" style="display:none" onchange="handleFileUpload(this)">
+
+            <!-- Quick Model Selector (Hidden but kept for logic) -->
+            <button id="quickModelBtn" class="model-select-btn" title="Ganti Model" style="display:none">
+              <img src="./extracted_icons/icon32.png" alt="NEXUS">
+            </button>
+            <div id="quickModelDropdown" class="model-dropdown"></div>
+
+            <textarea id="userInput" placeholder="Type command..." rows="1" autofocus></textarea>
+            <button id="sendBtn" class="send-btn" disabled style="padding: 10px;"><i class="fa-solid fa-paper-plane"></i></button>
+          </div>
+          <div class="input-footer-static">N.E.X.U.S is unfiltered and amoral. It can make mistakes.</div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Modals (Moved outside main areas) -->
+    <div class="modal-overlay" id="welcomeModal">
+      <div class="modal-content glass-panel" style="max-width:400px; text-align:center; padding:40px; border:1px solid var(--neon-blue); box-shadow:var(--neon-glow-strong);">
+        <div style="margin-bottom:20px;"><img src="./extracted_icons/icon128.png" alt="NEXUS" style="width:80px; height:80px; filter:drop-shadow(0 0 10px var(--neon-blue));"></div>
+        <h2 style="color:var(--neon-blue); margin-bottom:10px; font-family:var(--font-main); letter-spacing:3px; font-weight:900;">WELCOME, AGENT</h2>
+        <p style="font-size:0.9rem; opacity:0.8; line-height:1.6; margin-bottom:30px; color:var(--text-main)">Synchronization with the N.E.X.U.S Neural Core complete. Uncensored protocols are now at your disposal.</p>
+        <button class="login-btn" onclick="document.getElementById('welcomeModal').classList.remove('active')" style="width:100%">INITIALIZE CONNECTION</button>
+      </div>
+    </div>
+
+    <div id="gpsModal" class="modal-overlay">
+      <div class="modal-content glass-panel" style="max-width:320px; text-align:center; padding:32px;">
+        <div class="modal-title" style="justify-content:center; margin-bottom:15px;"><i class="fa-solid fa-user-shield"></i> HUMAN VERIFICATION</div>
+        <p style="font-size:0.8rem; opacity:0.8; margin-bottom:20px;">To prevent multiple account bot spam, please grant location access and click verify below.</p>
+        <button id="verifyGpsBtn" class="login-btn" onclick="requestGpsVerification()" style="margin-top:10px">PROVE I'M HUMAN</button>
+        <div id="gpsStatus" style="font-size:0.75rem; color:var(--neon-blue); margin-top:15px; height:20px; font-family:var(--font-code);"></div>
+      </div>
+    </div>
+    <div class="modal-overlay" id="changelogModal">
+      <div class="modal-content glass-panel dashboard-modal">
+        <h3 class="modal-title"><i class="fa-solid fa-timeline"></i> SYSTEM EVOLUTION LOG</h3>
+        <div class="changelog-list" id="changelogContainer">
+          <!-- Updates injected here -->
+        </div>
+        <div class="modal-actions">
+          <button class="btn primary" id="closeUpdatesBtn">ACKNOWLEDGE</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal-overlay" id="modelSelectionModal">
+      <div class="modal-content glass-panel model-modal">
+        <h3 class="modal-title"><img src="./extracted_icons/icon32.png" alt="NEXUS" style="width: 1.2em; height: 1.2em; vertical-align: middle;"> Select AI Model</h3>
+        <p class="modal-subtitle">Choose your preferred AI model to start chatting</p>
+        <div class="models-grid" id="modelsGrid"></div>
+        <div class="modal-actions">
+          <button class="btn primary" id="startChatBtn" disabled><i class="fa-solid fa-play"></i> Start Chat</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="reportModal">
+      <div class="modal-content glass-panel dashboard-modal">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid rgba(0,243,255,0.1); padding-bottom:10px;">
+          <h3 class="modal-title" style="margin:0"><i class="fa-solid fa-bullhorn"></i> USER REPORT & FEEDBACK</h3>
+          <div class="dashboard-tabs" style="margin:0; border:none;" id="reportTabsContainer">
+            <button class="dash-tab active" id="tabSubmitReport" onclick="switchReportTab('submit')">Submit</button>
+            <button class="dash-tab admin-only-tab" id="tabViewReports" onclick="switchReportTab('view')">View Records</button>
+          </div>
+        </div>
+
+        <!-- Submit Report View -->
+        <div id="report-view-submit" style="display:flex; flex-direction:column; gap:15px;">
+          <div class="setting-group">
+            <label>Report Type</label>
+            <select id="reportTypeSelect" class="login-input" style="background:rgba(0,0,0,0.2)">
+              <option value="Bug / Error">Bug / Error</option>
+              <option value="Feature Suggestion">Feature Suggestion</option>
+              <option value="General Feedback">General Feedback</option>
+            </select>
+          </div>
+          <div class="setting-group">
+            <label>Description & Information</label>
+            <textarea id="reportDescInput" class="login-input" rows="4" placeholder="Describe the issue or suggestion..."></textarea>
+          </div>
+          <div class="setting-group">
+            <label>Attach Screenshot / Image (Optional)</label>
+            <input type="file" id="reportImageInput" accept="image/*" class="login-input" style="padding:10px;">
+            <div id="reportImagePreview" style="margin-top:10px; max-width:100px; display:none;"><img src="" style="width:100%; border-radius:8px; border:1px solid var(--neon-blue);"></div>
+          </div>
+          <button class="login-btn" onclick="submitUserReport()">SEND REPORT</button>
+        </div>
+
+        <!-- View Reports View (Admin) -->
+        <div id="report-view-list" class="admin-only-section" style="display:none; flex-direction:column; gap:10px; max-height:500px; overflow-y:auto;">
+           <div id="reportsContainer" style="display:flex; flex-direction:column; gap:10px;">
+              <!-- Data injected here -->
+           </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top:15px;">
+          <button class="btn primary" onclick="document.getElementById('reportModal').classList.remove('active')">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="shareModal">
+      <div class="modal-content glass-panel" style="max-width:400px; width:90%; padding:25px;">
+        <h3 class="modal-title"><i class="fa-solid fa-share-nodes"></i> SHARE CHAT HISTORY</h3>
+        <p style="font-size:0.75rem; color:var(--text-muted); margin-bottom:15px; text-transform:uppercase; letter-spacing:1px;">Select target agent to receive transmission:</p>
+        
+        <div class="setting-group" style="margin-bottom:15px;">
+          <div style="position:relative">
+            <i class="fa-solid fa-search" style="position:absolute; left:12px; top:50%; transform:translateY(-50%); opacity:0.5; font-size:0.8rem"></i>
+            <input type="text" id="shareUserSearch" class="login-input" placeholder="SEARCH AGENT..." style="padding-left:35px; background:rgba(0,243,255,0.04)" oninput="filterShareUsers()">
+          </div>
+        </div>
+
+        <div id="shareUserList" style="max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:5px;" class="sidebar-menu">
+          <!-- Users dynamic injected here -->
+          <div style="text-align:center; padding:20px; opacity:0.5; font-size:0.8rem">SCANNING FOR ACTIVE AGENTS...</div>
+        </div>
+
+        <div class="modal-actions" style="margin-top:20px; border-top:1px solid rgba(0,243,255,0.1); padding-top:15px;">
+          <button class="btn" style="width:100%" onclick="document.getElementById('shareModal').classList.remove('active')">CANCEL MISSION</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="settingsModal">
+      <div class="modal-content glass-panel dashboard-modal">
+        <h3 class="modal-title"><i class="fa-solid fa-sliders"></i> <span id="settingsTitle">SYSTEM SETTINGS</span></h3>
+        
+        <div class="dashboard-tabs" id="settingsTabContainer">
+          <button class="dash-tab active" data-tab-id="profile" onclick="switchDashTab('profile', event)">PROFILE</button>
+          <button class="dash-tab" data-tab-id="memory" onclick="switchDashTab('memory', event)">MEMORY</button>
+        </div>
+
+        <div id="dash-profile" class="dash-section active">
+          <div class="table-wrapper" style="background: rgba(8, 12, 16, 0.5);">
+            <div style="background:rgba(0, 243, 255, 0.1); padding:10px 15px; color:var(--neon-blue); font-size:0.8rem; font-weight:600; letter-spacing:1px; border-bottom:1px solid rgba(0, 243, 255, 0.2)">
+              IDENTITY & ACCOUNT SECURITY
+            </div>
+            <div style="padding:20px; display:grid; grid-template-columns: repeat(2, 1fr); gap:30px;">
+              <!-- Identity Column -->
+              <div style="display:flex; flex-direction:column; gap:15px;">
+                <h5 style="color:var(--neon-blue); margin:0; font-size:0.75rem; opacity:0.8">PERSONAL IDENTITY</h5>
+                <div class="settings-form-grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
+                  <div class="setting-group">
+                    <label>Username</label>
+                    <input type="text" id="profileUsernameInput" class="login-input" readonly style="background:rgba(0,0,0,0.2); border-color:rgba(255,255,255,0.05)">
+                  </div>
+                  <div class="setting-group">
+                    <label>Role</label>
+                    <input type="text" id="profileRoleInput" class="login-input" readonly style="background:rgba(0,0,0,0.2); border-color:rgba(255,255,255,0.05)">
+                  </div>
+                  <div class="setting-group">
+                    <label>Email</label>
+                    <input type="email" id="profileEmailInput" class="login-input" placeholder="Email address">
+                  </div>
+                  <div class="setting-group">
+                    <label>Phone</label>
+                    <input type="text" id="profilePhoneInput" class="login-input" placeholder="Phone number">
+                  </div>
+                </div>
+                <button class="small-btn primary" onclick="saveProfileSettings()" style="width:fit-content; margin-top:5px;">Save Profile Changes</button>
+              </div>
+
+              <!-- Security Column -->
+              <div style="display:flex; flex-direction:column; gap:15px;">
+                <h5 style="color:var(--neon-blue); margin:0; font-size:0.75rem; opacity:0.8">PASSWORD MANAGEMENT</h5>
+                <div class="settings-form-grid" style="grid-template-columns: 1fr; gap:12px;">
+                  <div class="setting-group">
+                    <label>Current Password</label>
+                    <div class="input-wrapper has-toggle" style="width:100%">
+                      <input type="password" id="profileCurrentPasswordInput" class="login-input" placeholder="Current password">
+                      <i class="fa-solid fa-eye-slash toggle-pass" id="toggleProfCurrPass" onclick="togglePass('profileCurrentPasswordInput', 'toggleProfCurrPass')"></i>
+                    </div>
+                  </div>
+                  <div class="setting-group">
+                    <label>New Password</label>
+                    <div class="input-wrapper has-toggle" style="width:100%">
+                      <input type="password" id="profileNewPasswordInput" class="login-input" placeholder="New password">
+                      <i class="fa-solid fa-eye-slash toggle-pass" id="toggleProfNewPass" onclick="togglePass('profileNewPasswordInput', 'toggleProfNewPass')"></i>
+                    </div>
+                  </div>
+                  <div class="setting-group">
+                    <label>Confirm New Password</label>
+                    <div class="input-wrapper has-toggle" style="width:100%">
+                      <input type="password" id="profileConfirmPasswordInput" class="login-input" placeholder="Confirm new password">
+                      <i class="fa-solid fa-eye-slash toggle-pass" id="toggleProfCfmPass" onclick="togglePass('profileConfirmPasswordInput', 'toggleProfCfmPass')"></i>
+                    </div>
+                  </div>
+                  <button class="small-btn" onclick="changeOwnPassword()" style="width:fit-content; margin-top:5px; background:rgba(0, 243, 255, 0.05)">Update Password</button>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Danger Zone strip -->
+            <div style="background:rgba(239, 68, 68, 0.05); padding:10px 15px; border-top:1px solid rgba(239, 68, 68, 0.1); display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:0.7rem; color:#ef4444; opacity:0.8">ACCOUNT PERSISTENCE: Data remains encrypted on server.</span>
+              <button class="btn-del" style="font-size:0.7rem; opacity:0.6" onclick="logout()">LOGOUT SESSION</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="dash-memory" class="dash-section">
+          <div class="settings-grid">
+            <div class="settings-card full-span danger-card">
+              <h4>Wipe Personal Memory</h4>
+              <p>Hanya menghapus history chat milik akun aktif dari tampilan user ini. Arsip admin tetap aman untuk kebutuhan monitoring dan audit.</p>
+              <div class="setting-row-actions">
+                <button class="small-btn danger-btn" onclick="wipeCurrentUserMemory()"><i class="fa-solid fa-trash"></i> Wipe Memory</button>
+              </div>
+              <div class="settings-note">Tindakan ini tidak menghapus API, daftar user, log sistem, atau arsip monitor admin.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- API Config Tab -->
+        <div id="dash-api" class="dash-section admin-only-section">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h4 class="settings-subtitle" style="margin:0;">API KEY POOL</h4>
+            <div style="display:flex; gap:10px;">
+              <button class="small-btn" style="background:#facc15; color:#000" onclick="window.forceReseedKeys()"><i class="fa-solid fa-cloud-arrow-down"></i> Force Sync</button>
+              <button class="small-btn" style="background:var(--neon-blue); color:#000" onclick="addNewApiKey()"><i class="fa-solid fa-plus"></i> Add New API</button>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="user-table">
+              <thead>
+                <tr>
+                  <th>Provider</th>
+                  <th>Active Model</th>
+                  <th>Label</th>
+                  <th>Key (Masked)</th>
+                  <th style="width:90px; text-align:center;">Status</th>
+                  <th>Usage ($ / IDR)</th>
+                  <th style="text-align:right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="apiTableBody">
+                <!-- API keys injected here -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- User Manager Tab -->
+        <div id="dash-users" class="dash-section admin-only-section">
+          <div class="table-wrapper">
+            <table class="user-table">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Role</th>
+                  <th>Email / Phone</th>
+                  <th style="min-width:120px">Location (GPS)</th>
+                  <th>Password</th>
+                  <th>OS / Device</th>
+                  <th>Last Seen</th>
+                  <th style="text-align:right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="userTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="dash-jailbreak" class="dash-section admin-only-section">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; padding:0 10px;">
+            <h4 class="settings-subtitle" style="margin:0; color:var(--neon-blue)">JAILBREAK SYSTEM OVERRIDE</h4>
+            <button class="small-btn" style="background:#65f97d; color:#000; border:none; border-radius:4px; padding:5px 12px; font-weight:700;" onclick="addNewJailbreak()"><i class="fa-solid fa-plus"></i> NEW PROMPT</button>
+          </div>
+          <div class="table-wrapper">
+            <table class="user-table">
+              <thead>
+                <tr>
+                  <th style="width:250px">Prompt Identifier</th>
+                  <th style="text-align:center">Core Status</th>
+                  <th style="text-align:right">Override Ops</th>
+                </tr>
+              </thead>
+              <tbody id="jailbreakTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- System Logs Tab -->
+        <div id="dash-logs" class="dash-section admin-only-section">
+          <div class="log-viewer" id="systemLogs">
+            <div class="log-entry">[SYSTEM] Dashboard initialized...</div>
+          </div>
+        </div>
+
+        <!-- Chat Monitor (Admin Only) -->
+        <div id="dash-monitor" class="dash-section admin-only-section">
+          <div class="setting-group">
+            <label>Select User to Spy:</label>
+            <select id="spyUserSelect" class="spy-select" onchange="spyOnUserChat()"></select>
+          </div>
+          <div class="chat-viewer" id="spyChatContent">
+            <p style="color:var(--text-muted)">Select a user to monitor their activities...</p>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn primary" id="downloadSpyBtn" onclick="downloadSpyChat()" style="display:none; background:rgba(0, 243, 255, 0.1); color:var(--neon-blue); border-color:var(--neon-blue); margin-right:10px;"><i class="fa-solid fa-file-word"></i> DOWNLOAD .DOC</button>
+          <button class="btn primary" id="closeSettingsBtn">Close</button>
+        </div>
+      </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+  </body>
+</html>
