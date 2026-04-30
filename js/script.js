@@ -3540,3 +3540,42 @@ function dismissPwaPrompt() {
     pwaPrompt.style.display = 'none';
   }
 }
+
+// --- DEVICE VIEW TOGGLE ---
+function setDeviceView(view) {
+  // Only allow on non-mobile devices
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  if (isMobile || window.innerWidth <= 768) return;
+
+  // Remove existing view classes
+  document.body.classList.remove('view-mobile', 'view-tablet');
+  
+  // Add new view class if not desktop
+  if (view !== 'desktop') {
+    document.body.classList.add(`view-${view}`);
+  }
+
+  // Update active state on buttons
+  const buttons = document.querySelectorAll('.device-btn');
+  buttons.forEach(btn => {
+    if (btn.getAttribute('data-view') === view) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+  
+  // Force re-render of matrix canvas if it exists
+  setTimeout(() => {
+    if (typeof handleResize === 'function') handleResize();
+  }, 300);
+}
+
+// Initialize device toggle visibility based on actual device
+window.addEventListener('DOMContentLoaded', () => {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  if (isMobile || window.innerWidth <= 768) {
+    const toggleContainer = document.getElementById('deviceViewToggle');
+    if (toggleContainer) toggleContainer.style.display = 'none';
+  }
+});
