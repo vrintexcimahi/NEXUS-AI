@@ -2003,7 +2003,7 @@ body.view-mobile .app-container {
   left: 50% !important;
   width: 375px !important;
   height: 812px !important;
-  transform: translate(-50%, -50%) !important;
+  transform: translate(-50%, -50%) scale(0.85) !important;
   border: 12px solid #111;
   border-radius: 40px;
   box-shadow: 0 0 50px rgba(0,243,255,0.2), inset 0 0 10px rgba(0,0,0,0.8);
@@ -2017,7 +2017,7 @@ body.view-tablet .app-container {
   left: 50% !important;
   width: 768px !important;
   height: 1024px !important;
-  transform: translate(-50%, -50%) scale(0.85) !important;
+  transform: translate(-50%, -50%) scale(0.7) !important;
   border: 18px solid #111;
   border-radius: 30px;
   box-shadow: 0 0 50px rgba(0,243,255,0.2);
@@ -2060,4 +2060,15 @@ body.view-tablet #openSidebarBtn {
 
 body.view-mobile .models-grid {
   grid-template-columns: repeat(2, 1fr);
+}
+
+/* Fix Paddings in Mobile View so they aren't cut off */
+body.view-mobile .input-area-wrapper {
+  padding: 6px 12px 14px;
+}
+body.view-mobile .messages-container {
+  padding: 15px 12px;
+}
+body.view-mobile .header-title {
+  font-size: 0.8rem;
 }
