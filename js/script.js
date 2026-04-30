@@ -3027,12 +3027,22 @@ window.NexusAuthPortal.boot();
 
 // UI Buttons
 document.getElementById("closeSidebarBtn").onclick = () => {
-    sidebar.classList.toggle("closed");
-    appContainer.classList.toggle("sidebar-closed");
+    const isMobileView = document.body.classList.contains("view-mobile") || document.body.classList.contains("view-tablet") || window.innerWidth <= 900;
+    if (isMobileView) {
+        sidebar.classList.remove("open");
+    } else {
+        sidebar.classList.toggle("closed");
+        appContainer.classList.toggle("sidebar-closed");
+    }
 };
 document.getElementById("openSidebarBtn").onclick = () => {
-    sidebar.classList.toggle("closed");
-    appContainer.classList.toggle("sidebar-closed");
+    const isMobileView = document.body.classList.contains("view-mobile") || document.body.classList.contains("view-tablet") || window.innerWidth <= 900;
+    if (isMobileView) {
+        sidebar.classList.toggle("open");
+    } else {
+        sidebar.classList.toggle("closed");
+        appContainer.classList.toggle("sidebar-closed");
+    }
 };
 document.getElementById("settingsBtn").onclick = () => {
     document.getElementById("settingsModal").classList.add("active");
@@ -3549,6 +3559,12 @@ function setDeviceView(view) {
 
   // Remove existing view classes
   document.body.classList.remove('view-mobile', 'view-tablet');
+  
+  // Reset sidebar state to avoid layout glitches
+  const sidebar = document.querySelector('.sidebar');
+  const appContainer = document.querySelector('.app-container');
+  if (sidebar) sidebar.classList.remove('open', 'closed');
+  if (appContainer) appContainer.classList.remove('sidebar-closed');
   
   // Add new view class if not desktop
   if (view !== 'desktop') {
