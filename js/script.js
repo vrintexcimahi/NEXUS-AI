@@ -3486,3 +3486,57 @@ window.viewFullImage = (src) => {
     img.src = src;
     modal.classList.add('active');
 };
+
+// --- PWA LOGIC ---
+let deferredPrompt;
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(registration => {
+        console.log('[NEXUS PWA] Service Worker registered with scope:', registration.scope);
+      })
+      .catch(error => {
+        console.log('[NEXUS PWA] Service Worker registration failed:', error);
+      });
+  });
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  // Prevent the mini-infobar from appearing on mobile
+  e.preventDefault();
+  // Stash the event so it can be triggered later.
+  deferredPrompt = e;
+  
+  // Show our custom install prompt
+  const pwaPrompt = document.getElementById('pwaInstallPrompt');
+  if (pwaPrompt) {
+    pwaPrompt.style.display = 'flex';
+  }
+});
+
+function installPwa() {
+  const pwaPrompt = document.getElementById('pwaInstallPrompt');
+  if (pwaPrompt) {
+    pwaPrompt.style.display = 'none';
+  }
+  
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then((choiceResult) => {
+      if (choiceResult.outcome === 'accepted') {
+        console.log('[NEXUS PWA] User accepted the install prompt');
+      } else {
+        console.log('[NEXUS PWA] User dismissed the install prompt');
+      }
+      deferredPrompt = null;
+    });
+  }
+}
+
+function dismissPwaPrompt() {
+  const pwaPrompt = document.getElementById('pwaInstallPrompt');
+  if (pwaPrompt) {
+    pwaPrompt.style.display = 'none';
+  }
+}

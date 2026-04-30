@@ -1,0 +1,21 @@
+{
+  "name": "N.E.X.U.S GPT AI",
+  "short_name": "N.E.X.U.S",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#00f3ff",
+  "description": "N.E.X.U.S GPT AI - Advanced Agentic Coding",
+  "icons": [
+    {
+      "src": "/extracted_icons/icon256.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    },
+    {
+      "src": "/extracted_icons/icon500.png",
+      "sizes": "500x500",
+      "type": "image/png"
+    }
+  ]
+}
