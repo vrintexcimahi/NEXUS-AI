@@ -2061,12 +2061,29 @@ body.view-mobile .models-grid {
   grid-template-columns: repeat(2, 1fr);
 }
 
+/* Hide elements that shouldn't appear in mobile simulation or outside the frame */
+body.view-mobile #matrixCanvas,
+body.view-tablet #matrixCanvas,
+body.view-mobile #musicToggleBtn,
+body.view-tablet #musicToggleBtn {
+  display: none !important;
+}
+
 /* Fix Paddings in Mobile View so they aren't cut off */
 body.view-mobile .input-area-wrapper {
-  padding: 6px 12px 14px;
+  padding: 4px 6px 10px;
+}
+body.view-mobile .input-area {
+  padding: 6px 10px;
+  gap: 8px;
+}
+body.view-mobile #userInput {
+  font-size: 0.85rem;
+  padding: 10px 0;
+  min-height: 44px;
 }
 body.view-mobile .messages-container {
-  padding: 15px 12px;
+  padding: 10px 8px;
 }
 body.view-mobile .header-title {
   font-size: 0.8rem;
