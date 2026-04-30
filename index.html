@@ -12,10 +12,11 @@
     <link rel="icon" type="image/png" sizes="256x256" href="./extracted_icons/icon256.png" />
     <link rel="icon" type="image/png" sizes="500x500" href="./extracted_icons/icon500.png" />
     
-    <link rel="stylesheet" href="css/style.css?v=nexus_ultra_v2" />
+    <link rel="stylesheet" href="css/style.css?v=nexus_incremental_20260430a" />
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
-    <script src="js/script.js?v=nexus_ultra_v2" defer></script>
+    <script src="js/update-core.js?v=nexus_incremental_20260430a" defer></script>
+    <script src="js/script.js?v=nexus_incremental_20260430a" defer></script>
   </head>
   <body>
     <!-- Context Menu for Chat History -->
@@ -168,11 +169,9 @@
                 <i class="fa-solid fa-right-from-bracket"></i>
               </button>
             </div>
-            
             <div id="groupMessages" class="group-messages">
               <!-- Messages load here -->
             </div>
-
             <div class="group-input-area">
               <form id="groupMessageForm" onsubmit="sendGroupMessage(event)">
                 <input type="text" id="groupMessageInput" placeholder="TRANSMIT MESSAGE TO PULSE..." autocomplete="off">
@@ -246,7 +245,7 @@
       <div class="modal-content glass-panel" style="max-width:400px; text-align:center; padding:40px; border:1px solid var(--neon-blue); box-shadow:var(--neon-glow-strong);">
         <div style="margin-bottom:20px;"><img src="./extracted_icons/icon128.png" alt="NEXUS" style="width:80px; height:80px; filter:drop-shadow(0 0 10px var(--neon-blue));"></div>
         <h2 style="color:var(--neon-blue); margin-bottom:10px; font-family:var(--font-main); letter-spacing:3px; font-weight:900;">WELCOME, AGENT</h2>
-        <p style="font-size:0.9rem; opacity:0.8; line-height:1.6; margin-bottom:30px; color:var(--text-main)">Synchronization with the N.E.X.U.S Neural Core complete. Uncensored protocols are now at your disposal.</p>
+        <p style="font-size:0.9rem; opacity:0.8; line-height:1.6; margin-bottom:30px; color:var(--text-main)">Synchronization with the NEXUS Delta Core complete. Your workspace is ready.</p>
         <button class="login-btn" onclick="document.getElementById('welcomeModal').classList.remove('active')" style="width:100%">INITIALIZE CONNECTION</button>
       </div>
     </div>
@@ -322,6 +321,7 @@
            </div>
         </div>
 
+
         <div class="modal-actions" style="margin-top:15px;">
           <button class="btn primary" onclick="document.getElementById('reportModal').classList.remove('active')">Close</button>
         </div>
@@ -351,13 +351,39 @@
       </div>
     </div>
 
+    <!-- Jailbreak Full Page Editor Modal -->
+    <div class="modal-overlay" id="jailbreakEditModal" style="z-index: 9999;">
+      <div class="modal-content glass-panel dashboard-modal" style="width: 95vw; height: 95vh; max-width: none; max-height: none; display: flex; flex-direction: column;">
+        <h3 class="modal-title"><i class="fa-solid fa-user-ninja"></i> <span id="jailbreakModalTitle">EDIT JAILBREAK</span></h3>
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 15px; overflow: hidden;">
+          <div class="setting-group" style="flex-shrink: 0;">
+            <label>Prompt Identifier Name</label>
+            <input type="text" id="jailbreakNameInput" class="login-input" placeholder="e.g. N.E.X.U.S Standard">
+          </div>
+          <div class="setting-group" style="flex: 1; display: flex; flex-direction: column;">
+            <label>Full Jailbreak Directive Content</label>
+            <textarea id="jailbreakContentInput" class="login-input" style="flex: 1; resize: none; font-family: var(--font-code); font-size: 0.85rem; padding: 15px; white-space: pre-wrap; line-height: 1.5;" placeholder="Enter directive here..."></textarea>
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top: 15px; flex-shrink: 0;">
+          <input type="hidden" id="jailbreakEditId">
+          <button class="btn" onclick="closeJailbreakModal()">Cancel</button>
+          <button class="btn primary" onclick="saveJailbreakModal()">Save Core Override</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="settingsModal">
       <div class="modal-content glass-panel dashboard-modal">
         <h3 class="modal-title"><i class="fa-solid fa-sliders"></i> <span id="settingsTitle">SYSTEM SETTINGS</span></h3>
         
         <div class="dashboard-tabs" id="settingsTabContainer">
           <button class="dash-tab active" data-tab-id="profile" onclick="switchDashTab('profile', event)">PROFILE</button>
-          <button class="dash-tab" data-tab-id="memory" onclick="switchDashTab('memory', event)">MEMORY</button>
+          <button class="dash-tab admin-only-tab" data-tab-id="api" onclick="switchDashTab('api', event)">API</button>
+          <button class="dash-tab admin-only-tab" data-tab-id="jailbreak" onclick="switchDashTab('jailbreak', event)">JAILBREAK</button>
+          <button class="dash-tab admin-only-tab" data-tab-id="users" onclick="switchDashTab('users', event)">USERS</button>
+          <button class="dash-tab admin-only-tab" data-tab-id="monitor" onclick="switchDashTab('monitor', event)">MONITOR</button>
+          <button class="dash-tab admin-only-tab" data-tab-id="logs" onclick="switchDashTab('logs', event)">LOGS</button>
         </div>
 
         <div id="dash-profile" class="dash-section active">
@@ -428,19 +454,6 @@
           </div>
         </div>
 
-        <div id="dash-memory" class="dash-section">
-          <div class="settings-grid">
-            <div class="settings-card full-span danger-card">
-              <h4>Wipe Personal Memory</h4>
-              <p>Hanya menghapus history chat milik akun aktif dari tampilan user ini. Arsip admin tetap aman untuk kebutuhan monitoring dan audit.</p>
-              <div class="setting-row-actions">
-                <button class="small-btn danger-btn" onclick="wipeCurrentUserMemory()"><i class="fa-solid fa-trash"></i> Wipe Memory</button>
-              </div>
-              <div class="settings-note">Tindakan ini tidak menghapus API, daftar user, log sistem, atau arsip monitor admin.</div>
-            </div>
-          </div>
-        </div>
-
         <!-- API Config Tab -->
         <div id="dash-api" class="dash-section admin-only-section">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
@@ -450,6 +463,7 @@
               <button class="small-btn" style="background:var(--neon-blue); color:#000" onclick="addNewApiKey()"><i class="fa-solid fa-plus"></i> Add New API</button>
             </div>
           </div>
+          <div id="apiUsageSummary" class="api-stats-grid"></div>
           <div class="table-wrapper">
             <table class="user-table">
               <thead>
@@ -510,14 +524,12 @@
           </div>
         </div>
 
-        <!-- System Logs Tab -->
         <div id="dash-logs" class="dash-section admin-only-section">
           <div class="log-viewer" id="systemLogs">
             <div class="log-entry">[SYSTEM] Dashboard initialized...</div>
           </div>
         </div>
 
-        <!-- Chat Monitor (Admin Only) -->
         <div id="dash-monitor" class="dash-section admin-only-section">
           <div class="setting-group">
             <label>Select User to Spy:</label>

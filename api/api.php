@@ -6,7 +6,15 @@ header('Access-Control-Allow-Headers: Content-Type');
 
 try {
     // --- DATABASE CONFIGURATION ---
-    $dbFile = '/tmp/nexus_gpt.db';
+    $bundledDbFile = __DIR__ . '/nexus_gpt.db';
+    $localRuntimeDbFile = __DIR__ . '/nexus_gpt.runtime.db';
+    $tempRuntimeDbFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'nexus_gpt.db';
+    $dbFile = is_writable(__DIR__) ? $localRuntimeDbFile : $tempRuntimeDbFile;
+
+    if (!file_exists($dbFile) && file_exists($bundledDbFile)) {
+        @copy($bundledDbFile, $dbFile);
+    }
+
     $db = new PDO("sqlite:$dbFile");
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
@@ -115,19 +123,59 @@ try {
     if (!in_array('usage_usd', $existingCols)) { @$db->exec("ALTER TABLE api_keys ADD COLUMN usage_usd REAL DEFAULT 0.0"); }
     if (!in_array('usage_tokens', $existingCols)) { @$db->exec("ALTER TABLE api_keys ADD COLUMN usage_tokens INTEGER DEFAULT 0"); }
 
+    $inferProvider = function($apiKey, $provider = '') {
+        $provider = trim((string)$provider);
+        $apiKey = trim((string)$apiKey);
+        if ($provider !== '' && strtolower($provider) !== 'openai') return $provider;
+        if (strpos($apiKey, 'sk-or-v1-') === 0) return 'OpenRouter';
+        if (strpos($apiKey, 'AIza') === 0) return 'Gemini';
+        if (strpos($apiKey, 'gsk_') === 0) return 'Groq';
+        if (strpos($apiKey, 'sk-ant-') === 0) return 'Anthropic';
+        if (strpos($apiKey, 'ms-') === 0) return 'Mistral';
+        if (strpos($apiKey, 'sk-') === 0) return 'OpenAI';
+        return $provider ?: 'OpenRouter';
+    };
+
+    $defaultModelForProvider = function($provider) {
+        $normalized = strtolower((string)$provider);
+        if (strpos($normalized, 'openrouter') !== false) return 'openrouter/free';
+        if (strpos($normalized, 'gemini') !== false) return 'gemini-2.0-flash';
+        if (strpos($normalized, 'groq') !== false) return 'llama-3.3-70b-versatile';
+        if (strpos($normalized, 'anthropic') !== false) return 'claude-3-5-sonnet-latest';
+        if (strpos($normalized, 'mistral') !== false) return 'mistral-large-latest';
+        return 'gpt-4o-mini';
+    };
+
+    $normalizeModel = function($apiKey, $provider, $model) use ($defaultModelForProvider) {
+        $model = trim((string)$model);
+        $providerLower = strtolower((string)$provider);
+        $isLegacyOpenRouterDefault = strpos($apiKey, 'sk-or-v1-') === 0 && ($model === '' || $model === 'gpt-4' || $model === 'deepseek/deepseek-chat');
+        if ($isLegacyOpenRouterDefault || $model === '') return $defaultModelForProvider($provider);
+        if (strpos($providerLower, 'openrouter') !== false && ($model === 'gpt-4' || $model === 'deepseek/deepseek-chat')) {
+            return 'openrouter/free';
+        }
+        return $model;
+    };
+
+    // Compatibility migration: old sk-or-v1 rows may have OpenAI/gpt-4 metadata.
+    @$db->exec("UPDATE api_keys SET provider = 'OpenRouter' WHERE api_key LIKE 'sk-or-v1-%' AND (provider IS NULL OR provider = '' OR provider = 'OpenAI')");
+    @$db->exec("UPDATE api_keys SET model = 'openrouter/free' WHERE api_key LIKE 'sk-or-v1-%' AND (model IS NULL OR model = '' OR model = 'gpt-4' OR model = 'deepseek/deepseek-chat')");
+
 
     // --- API KEY SEEDING (Aggressive) ---
     $defaultKeys = [
         ['OR-Alpha', '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'],
         ['OR-Beta', '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'],
-        ['OR-Gamma', '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']
+        ['OR-Gamma', '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'],
+        ['OR-Delta', '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'],
+        ['OR-Epsilon', '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']
     ];
 
     foreach ($defaultKeys as $k) {
         $check = $db->prepare("SELECT id FROM api_keys WHERE api_key = ?");
         $check->execute([$k[1]]);
         if (!$check->fetch()) {
-            $db->prepare("INSERT INTO api_keys (label, api_key, provider, model, owner) VALUES (?, ?, 'OpenRouter', 'deepseek/deepseek-chat', 'system')")
+            $db->prepare("INSERT INTO api_keys (label, api_key, provider, model, owner) VALUES (?, ?, 'OpenRouter', 'openrouter/free', 'system')")
                ->execute([$k[0], $k[1]]);
         }
     }
@@ -152,7 +200,7 @@ try {
                     $check = $db->prepare("SELECT id FROM api_keys WHERE api_key = ?");
                     $check->execute([$line]);
                     if (!$check->fetch()) {
-                        $db->prepare("INSERT INTO api_keys (label, api_key, provider, model, owner) VALUES (?, ?, 'OpenRouter', 'deepseek/deepseek-chat', 'system')")
+                        $db->prepare("INSERT INTO api_keys (label, api_key, provider, model, owner) VALUES (?, ?, 'OpenRouter', 'openrouter/free', 'system')")
                            ->execute(['OR-Auto-Import', $line]);
                     }
                 } catch (Exception $e) {}
@@ -198,12 +246,18 @@ try {
             echo json_encode(['success' => true, 'jailbreak' => $jb]);
             break;
 
+        case 'delete_jailbreak':
+            $id = $_GET['id'] ?? '';
+            $db->prepare("DELETE FROM jailbreak_prompts WHERE id = ?")->execute([$id]);
+            echo json_encode(['success' => true]);
+            break;
+
         case 'force_reseed_keys':
             foreach ($defaultKeys as $k) {
                 $check = $db->prepare("SELECT id FROM api_keys WHERE api_key = ?");
                 $check->execute([$k[1]]);
                 if (!$check->fetch()) {
-                    $db->prepare("INSERT INTO api_keys (label, api_key, provider, model, owner) VALUES (?, ?, 'OpenRouter', 'deepseek/deepseek-chat', 'system')")
+                    $db->prepare("INSERT INTO api_keys (label, api_key, provider, model, owner) VALUES (?, ?, 'OpenRouter', 'openrouter/free', 'system')")
                        ->execute([$k[0], $k[1]]);
                 }
             }
@@ -361,12 +415,23 @@ try {
             try {
                 $label = $input['label'] ?? 'UNNAMED';
                 $key = $input['api_key'] ?? '';
-                $prov = $input['provider'] ?? 'OpenAI';
-                $mod = $input['model'] ?? 'gpt-4';
+                $prov = $inferProvider($key, $input['provider'] ?? '');
+                $mod = $normalizeModel($key, $prov, $input['model'] ?? '');
                 if (empty($key)) throw new Exception("API Key cannot be empty");
-                $db->prepare("INSERT INTO api_keys (label, api_key, provider, model, owner) VALUES (?, ?, ?, ?, 'system')")
-                   ->execute([$label, $key, $prov, $mod]);
-                echo json_encode(['success' => true]);
+
+                $check = $db->prepare("SELECT id FROM api_keys WHERE api_key = ? ORDER BY id ASC LIMIT 1");
+                $check->execute([$key]);
+                $existingId = $check->fetchColumn();
+
+                if ($existingId) {
+                    $db->prepare("UPDATE api_keys SET label = ?, provider = ?, model = ?, status = 'active' WHERE id = ?")
+                       ->execute([$label, $prov, $mod, $existingId]);
+                    echo json_encode(['success' => true, 'id' => (int)$existingId, 'message' => 'API key updated']);
+                } else {
+                    $db->prepare("INSERT INTO api_keys (label, api_key, provider, model, owner) VALUES (?, ?, ?, ?, 'system')")
+                       ->execute([$label, $key, $prov, $mod]);
+                    echo json_encode(['success' => true, 'id' => (int)$db->lastInsertId(), 'message' => 'API key saved']);
+                }
             } catch (Exception $e) {
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
@@ -393,11 +458,15 @@ try {
             $rotIdxStmt = $db->query("SELECT value_data FROM global_config WHERE key_name = 'api_rotation_idx'");
             $rotIdx = (int)($rotIdxStmt->fetchColumn() ?: 0);
             $nextIdx = $rotIdx % $totalActive;
-            $keyStmt = $db->query("SELECT api_key FROM api_keys WHERE status = 'active' ORDER BY id ASC LIMIT 1 OFFSET $nextIdx");
-            $k = $keyStmt->fetchColumn();
+            $keyStmt = $db->query("SELECT id, label, api_key, provider, model, owner, status, usage_usd, usage_tokens FROM api_keys WHERE status = 'active' ORDER BY id ASC LIMIT 1 OFFSET $nextIdx");
+            $record = $keyStmt->fetch(PDO::FETCH_ASSOC);
             $db->prepare("INSERT OR REPLACE INTO global_config (key_name, value_data) VALUES ('api_rotation_idx', ?)")
                ->execute([$rotIdx + 1]);
-            echo json_encode(['success' => !!$k, 'apiKey' => $k ?: null]);
+            echo json_encode([
+                'success' => !!$record,
+                'apiKey' => $record['api_key'] ?? null,
+                'key' => $record ?: null
+            ]);
             break;
 
         case 'mark_key_exhausted':

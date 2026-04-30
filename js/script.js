@@ -87,7 +87,9 @@ window.getStoredSession = function() {
     if (!rawSession) return null;
     var session = JSON.parse(rawSession);
     if (!session || typeof session !== "object") return null;
-    return session;
+    return window.NexusUpdateCore
+      ? window.NexusUpdateCore.adapt("session.v1", session, session)
+      : session;
   } catch (e) {
     return null;
   }
@@ -106,6 +108,72 @@ const settingsModal = document.getElementById("settingsModal");
 const newChatBtn = document.getElementById("newChatBtn");
 const AUTH_LOCK = window.NEXUS_AUTH_PORTAL_LOCK;
 
+const ADMIN_SIDEBAR_BUTTONS = [
+  { id: "apiConfigSidebarBtn", tab: "api", icon: "fa-network-wired", label: "API Config" },
+  { id: "jailbreakSidebarBtn", tab: "jailbreak", icon: "fa-user-ninja", label: "Jailbreak Manager" },
+  { id: "userManagerSidebarBtn", tab: "users", icon: "fa-users-gear", label: "User Manager" },
+  { id: "chatMonitorSidebarBtn", tab: "monitor", icon: "fa-desktop", label: "Chat Monitor" },
+  { id: "systemLogsSidebarBtn", tab: "logs", icon: "fa-terminal", label: "System Logs" }
+];
+
+function getEffectiveSession() {
+  const session = window.getStoredSession ? window.getStoredSession() : null;
+  return session && typeof session === "object" ? session : {};
+}
+
+function isAdminSession(roleHint) {
+  const session = getEffectiveSession();
+  const role = String(roleHint || session.role || window.currentRole || "").toLowerCase();
+  const username = String(session.username || window.currentUser || "").toLowerCase();
+  return role === "admin" || username === "admin";
+}
+
+function ensureAdminSidebarButtons() {
+  const container = document.querySelector(".sidebar-utility-actions");
+  if (!container) return;
+  const anchor = document.getElementById("userReportMenuBtn") || container.firstElementChild;
+  ADMIN_SIDEBAR_BUTTONS.forEach(item => {
+    if (document.getElementById(item.id)) return;
+    const button = document.createElement("button");
+    button.id = item.id;
+    button.className = "menu-btn admin-only-tab";
+    button.type = "button";
+    button.innerHTML = `<i class="fa-solid ${item.icon}"></i> <span>${item.label}</span>`;
+    button.onclick = () => {
+      const modal = document.getElementById("settingsModal");
+      if (modal) modal.classList.add("active");
+      window.switchDashTab(item.tab);
+    };
+    container.insertBefore(button, anchor);
+  });
+}
+
+window.restoreAdminSurface = function(roleHint) {
+  ensureAdminSidebarButtons();
+  const isAdmin = isAdminSession(roleHint);
+  if (isAdmin) window.currentRole = "admin";
+
+  document.querySelectorAll(".admin-only-tab, .admin-only-section").forEach(el => {
+    if (isAdmin) {
+      el.removeAttribute("hidden");
+      el.hidden = false;
+    } else {
+      el.setAttribute("hidden", "true");
+    }
+  });
+
+  return isAdmin;
+};
+
+if (window.NexusUpdateCore) {
+  window.NexusUpdateCore.registerGuard("admin-surface", context => {
+    return window.restoreAdminSurface(context.roleHint || context.role || window.currentRole);
+  });
+  window.NexusUpdateCore.registerGuard("legacy-public-api", () => {
+    return !!(window.NEXUS_AUTH_PORTAL_LOCK && window.NEXUS_AUTH_PORTAL_LOCK.apiEndpoint);
+  });
+}
+
 let selectedModelIdx = null;
 let thinkingMode = false;
 let isWaitingForResponse = false;
@@ -121,6 +189,7 @@ const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 let currentRole = "user";
 const ADMIN_HISTORY_ARCHIVE_KEY = "nexus_admin_history_archive";
 const ADMIN_DELETED_ARCHIVE_KEY = "nexus_admin_deleted_archive";
+const HISTORY_DELETE_TOMBSTONE_TTL = 1000 * 60 * 60 * 24 * 30;
 const THINKING_INSTRUCTION = "Before answering, show your logical thinking process wrapped in <thinking> tags. Analyze the user's intent deeply.";
 let webChatHistory = [];
 
@@ -190,6 +259,415 @@ function getStoredApis() {
     window.storageSetJson("nexus_api_list", list);
   }
   return list;
+}
+
+const LOCAL_API_BACKUP_KEY = "nexus_api_keys";
+const LOCAL_API_POOL_META_KEY = "nexus_active_pool_meta";
+const LAST_GOOD_API_KEY = "nexus_last_good_api_key";
+const API_KEY_FAILURE_COOLDOWN_MS = 1000 * 60 * 15;
+const OPENROUTER_FREE_MODEL_OPTIONS = [
+  { value: "openrouter/free", label: "OpenRouter Free Router", note: "Auto pilih model gratis yang tersedia", badge: "FREE ROUTER" },
+  { value: "openai/gpt-oss-120b:free", label: "OpenAI GPT OSS 120B", note: "Gratis, reasoning berat", badge: "FREE" },
+  { value: "qwen/qwen3-coder:free", label: "Qwen3 Coder", note: "Gratis, fokus coding", badge: "FREE" },
+  { value: "nvidia/nemotron-3-super-120b-a12b:free", label: "Nemotron 3 Super", note: "Gratis, serbaguna", badge: "FREE" },
+  { value: "nvidia/nemotron-3-nano-30b-a3b:free", label: "Nemotron 3 Nano 30B", note: "Gratis, lebih ringan", badge: "FREE" },
+  { value: "google/gemma-4-31b-it:free", label: "Gemma 4 31B IT", note: "Gratis, multimodal", badge: "FREE" },
+  { value: "deepseek/deepseek-chat", label: "DeepSeek Chat", note: "Fallback legacy non-free", badge: "LEGACY" }
+];
+
+function isLegacyDefaultModel(model, provider) {
+  const normalizedProvider = normalizeProviderName(provider);
+  const name = String(model || "").trim().toLowerCase();
+  if (!name) return true;
+  if (normalizedProvider === "OpenRouter") return name === "gpt-4" || name === "deepseek/deepseek-chat";
+  return false;
+}
+
+function inferProviderFromApiKey(apiKey = "") {
+  const key = String(apiKey || "").trim();
+  if (!key) return "Unknown";
+  if (key.startsWith("sk-or-v1-")) return "OpenRouter";
+  if (key.startsWith("ms-")) return "Mistral";
+  if (key.startsWith("AIza")) return "Gemini";
+  if (key.startsWith("gsk_")) return "Groq";
+  if (key.startsWith("sk-ant-")) return "Anthropic";
+  if (key.startsWith("sk-")) return "OpenAI";
+  return "Custom";
+}
+
+function normalizeProviderName(provider, apiKey = "") {
+  const raw = String(provider || "").trim();
+  if (!raw) return inferProviderFromApiKey(apiKey);
+  const lower = raw.toLowerCase();
+  if (lower.includes("openrouter")) return "OpenRouter";
+  if (lower.includes("openai")) return "OpenAI";
+  if (lower.includes("mistral")) return "Mistral";
+  if (lower.includes("gemini") || lower.includes("google")) return "Gemini";
+  if (lower.includes("groq")) return "Groq";
+  if (lower.includes("anthropic") || lower.includes("claude")) return "Anthropic";
+  return raw;
+}
+
+function getDefaultModelForProvider(provider) {
+  switch (normalizeProviderName(provider)) {
+    case "OpenAI": return "gpt-4o-mini";
+    case "Mistral": return "mistral-large-latest";
+    case "Gemini": return "gemini-2.0-flash";
+    case "Groq": return "llama-3.3-70b-versatile";
+    case "Anthropic": return "claude-3-5-sonnet-latest";
+    case "OpenRouter":
+    default:
+      return "openrouter/free";
+  }
+}
+
+function getModelOptionsForProvider(provider, currentModel = "") {
+  const normalizedProvider = normalizeProviderName(provider);
+  let options = [];
+
+  if (normalizedProvider === "OpenRouter") {
+    options = OPENROUTER_FREE_MODEL_OPTIONS.slice();
+  } else {
+    const fallbackModel = String(currentModel || "").trim() || getDefaultModelForProvider(normalizedProvider);
+    options = [{
+      value: fallbackModel,
+      label: fallbackModel,
+      note: "Default model untuk provider ini",
+      badge: "DEFAULT"
+    }];
+  }
+
+  const current = String(currentModel || "").trim();
+  if (current && !options.some(option => option.value === current)) {
+    options.unshift({
+      value: current,
+      label: current,
+      note: "Model yang sedang tersimpan",
+      badge: isFreeFocusedModel(current, normalizedProvider) ? "FREE" : "CUSTOM"
+    });
+  }
+
+  return options;
+}
+
+function isFreeFocusedModel(model, provider) {
+  const normalizedProvider = normalizeProviderName(provider);
+  const modelName = String(model || "").trim().toLowerCase();
+  if (!modelName) return false;
+  if (normalizedProvider === "OpenRouter") {
+    return modelName === "openrouter/free" || modelName.endsWith(":free");
+  }
+  return false;
+}
+
+function getModelMeta(provider, model) {
+  const normalizedProvider = normalizeProviderName(provider);
+  const modelName = String(model || "").trim();
+  const option = getModelOptionsForProvider(normalizedProvider, modelName).find(item => item.value === modelName);
+  if (option) {
+    return {
+      badge: option.badge || (isFreeFocusedModel(modelName, normalizedProvider) ? "FREE" : "CUSTOM"),
+      note: option.note || "Model tersimpan"
+    };
+  }
+  return {
+    badge: isFreeFocusedModel(modelName, normalizedProvider) ? "FREE" : "CUSTOM",
+    note: normalizedProvider === "OpenRouter" ? "Model custom OpenRouter" : "Model provider custom"
+  };
+}
+
+function formatTokenCount(value) {
+  return Math.max(0, Number(value || 0)).toLocaleString("id-ID");
+}
+
+function formatIdrFromUsd(value) {
+  return Math.round(Number(value || 0) * 16000).toLocaleString("id-ID");
+}
+
+function isModelCompatibleWithProvider(model, provider) {
+  const name = String(model || "").trim().toLowerCase();
+  const normalizedProvider = normalizeProviderName(provider);
+  if (!name) return false;
+  if (normalizedProvider === "OpenRouter" || normalizedProvider === "Custom") return true;
+  if (normalizedProvider === "OpenAI") return /^gpt-|^o[134]|^chatgpt|^omni|^text-/.test(name);
+  if (normalizedProvider === "Mistral") return name.includes("mistral") || name.includes("ministral") || name.includes("codestral") || name.includes("pixtral");
+  if (normalizedProvider === "Gemini") return name.includes("gemini");
+  if (normalizedProvider === "Groq") return name.includes("llama") || name.includes("mixtral") || name.includes("gemma") || name.includes("qwen") || name.includes("deepseek");
+  if (normalizedProvider === "Anthropic") return name.includes("claude");
+  return false;
+}
+
+function normalizeKeyStatus(status) {
+  const raw = String(status || "").trim().toLowerCase();
+  return raw === "exhausted" || raw === "limit" ? "LIMIT" : "ACTIVE";
+}
+
+function normalizeApiRecord(record = {}) {
+  if (window.NexusUpdateCore) {
+    record = window.NexusUpdateCore.adapt("apiKeyRecord.v1", record, record);
+  }
+  const apiKey = String(record.api_key || record.key || "").trim();
+  if (!apiKey) return null;
+  const provider = normalizeProviderName(record.provider, apiKey);
+  const rawModel = String(record.model || "").trim();
+  const model = rawModel && !isLegacyDefaultModel(rawModel, provider) ? rawModel : getDefaultModelForProvider(provider);
+  const label = String(record.label || "").trim() || `${provider.toUpperCase()}-${apiKey.substring(0, 4)}`;
+  return {
+    id: record.id || null,
+    label,
+    api_key: apiKey,
+    key: apiKey,
+    provider,
+    model,
+    owner: record.owner || "local",
+    status: normalizeKeyStatus(record.status),
+    usage_usd: Number(record.usage_usd || 0),
+    usage_tokens: Number(record.usage_tokens || 0)
+  };
+}
+
+function dedupeApiRecords(records = []) {
+  const byKey = new Map();
+  records.forEach((record) => {
+    const normalized = normalizeApiRecord(record);
+    if (normalized) byKey.set(normalized.api_key, normalized);
+  });
+  return Array.from(byKey.values());
+}
+
+function getLocalApiBackups() {
+  const records = [];
+  try {
+    const primary = JSON.parse(localStorage.getItem(LOCAL_API_BACKUP_KEY) || "[]");
+    if (Array.isArray(primary)) records.push(...primary);
+  } catch (e) {}
+  try {
+    const poolMeta = JSON.parse(localStorage.getItem(LOCAL_API_POOL_META_KEY) || "[]");
+    if (Array.isArray(poolMeta)) records.push(...poolMeta);
+  } catch (e) {}
+
+  const legacyList = getStoredApis();
+  if (Array.isArray(legacyList)) legacyList.forEach((apiKey) => records.push({ api_key: apiKey }));
+
+  const legacySingle = window.storageGetItem("nexus_api_key");
+  if (legacySingle) records.push({ api_key: legacySingle });
+
+  return dedupeApiRecords(records);
+}
+
+function persistApiRecordsLocally(records = []) {
+  const normalized = dedupeApiRecords(records);
+  try {
+    localStorage.setItem(LOCAL_API_BACKUP_KEY, JSON.stringify(normalized));
+    localStorage.setItem(LOCAL_API_POOL_META_KEY, JSON.stringify(normalized));
+    localStorage.setItem("nexus_api_list", JSON.stringify(normalized.map(r => r.api_key)));
+    if (normalized.length > 0) localStorage.setItem("nexus_api_key", normalized[0].api_key);
+  } catch (e) {}
+  return normalized;
+}
+
+function persistServerApiSnapshot(records = []) {
+  const normalized = persistApiRecordsLocally(records);
+  try {
+    localStorage.setItem("nexus_active_pool", JSON.stringify(normalized.map(r => r.api_key)));
+  } catch (e) {}
+  return normalized;
+}
+
+function getApiKeyFailureMap() {
+  try {
+    const raw = JSON.parse(localStorage.getItem("nexus_exhausted_keys") || "{}");
+    const now = Date.now();
+    if (Array.isArray(raw)) {
+      return raw.reduce((map, key) => {
+        if (key) map[key] = { failedAt: now, reason: "legacy" };
+        return map;
+      }, {});
+    }
+    return raw && typeof raw === "object" ? raw : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function persistApiKeyFailureMap(map) {
+  const now = Date.now();
+  const compacted = {};
+  Object.entries(map || {}).forEach(([key, value]) => {
+    const failedAt = Number(value?.failedAt || value || 0);
+    if (key && failedAt && now - failedAt < API_KEY_FAILURE_COOLDOWN_MS) {
+      compacted[key] = typeof value === "object" ? value : { failedAt, reason: "legacy" };
+    }
+  });
+  localStorage.setItem("nexus_exhausted_keys", JSON.stringify(compacted));
+  return compacted;
+}
+
+function getBlockedApiKeys() {
+  return Object.keys(persistApiKeyFailureMap(getApiKeyFailureMap()));
+}
+
+function clearApiKeyFailure(apiKey) {
+  if (!apiKey) return;
+  const map = getApiKeyFailureMap();
+  if (map[apiKey]) {
+    delete map[apiKey];
+    persistApiKeyFailureMap(map);
+  }
+}
+
+function rememberSuccessfulApiKey(apiKey) {
+  if (!apiKey) return;
+  localStorage.setItem(LAST_GOOD_API_KEY, apiKey);
+  localStorage.setItem("nexus_api_key", apiKey);
+  clearApiKeyFailure(apiKey);
+}
+
+function getActivePool() {
+  return getLocalApiBackups().map(record => record.api_key);
+}
+
+function resolveModelForApiRecord(record) {
+  const normalized = normalizeApiRecord(record);
+  if (!normalized) return getDefaultModelForProvider("OpenRouter");
+  const savedModel = String(normalized.model || "").trim();
+  if (savedModel && isModelCompatibleWithProvider(savedModel, normalized.provider)) return savedModel;
+  const selectedModel = String(localStorage.getItem("nexus_selected_model") || "").trim();
+  if (selectedModel && isModelCompatibleWithProvider(selectedModel, normalized.provider)) return selectedModel;
+  return getDefaultModelForProvider(normalized.provider);
+}
+
+function getCurrentAiModelMeta() {
+  const state = window.updateEngineStatus ? window.updateEngineStatus() : (window.__nexusEngineStatus || {});
+  return {
+    provider: normalizeProviderName(state.currentProvider || "OpenRouter"),
+    model: String(state.currentModel || localStorage.getItem("nexus_selected_model") || getDefaultModelForProvider("OpenRouter")).trim()
+  };
+}
+
+function normalizeAiModelMeta(meta = {}) {
+  const fallback = getCurrentAiModelMeta();
+  const provider = normalizeProviderName(meta.provider || fallback.provider);
+  const model = String(meta.model || fallback.model || getDefaultModelForProvider(provider)).trim();
+  return { provider, model };
+}
+
+function formatAiModelTag(provider, model) {
+  const safeProvider = String(provider || "AI").trim();
+  const safeModel = String(model || "auto").trim();
+  return `${safeProvider} / ${safeModel}`;
+}
+
+function updateCurrentAiModelTag(provider, model) {
+  const tag = document.getElementById("current-ai-model-tag");
+  if (!tag) return;
+  const meta = normalizeAiModelMeta({ provider, model });
+  tag.dataset.provider = meta.provider;
+  tag.dataset.model = meta.model;
+  tag.textContent = formatAiModelTag(meta.provider, meta.model);
+  const message = tag.closest(".message");
+  if (message) {
+    message.dataset.provider = meta.provider;
+    message.dataset.model = meta.model;
+  }
+}
+
+window.ensureUserApiAvailability = function() {
+  try {
+    const pool = getLocalApiBackups();
+    const exhaustedKeys = getBlockedApiKeys();
+    const lastGoodKey = localStorage.getItem(LAST_GOOD_API_KEY);
+    const activeRecord = pool.find(record => record.api_key === lastGoodKey && record.status !== "LIMIT" && !exhaustedKeys.includes(record.api_key)) ||
+      pool.find(record => record.status !== "LIMIT" && !exhaustedKeys.includes(record.api_key)) ||
+      pool[0] ||
+      null;
+    if (activeRecord) {
+      localStorage.setItem("nexus_api_key", activeRecord.api_key);
+      return activeRecord;
+    }
+    localStorage.removeItem("nexus_api_key");
+    return null;
+  } catch (e) {
+    return null;
+  }
+};
+
+window.updateEngineStatus = function() {
+  try {
+    const pool = getLocalApiBackups();
+    const exhaustedKeys = getBlockedApiKeys();
+    const activePool = pool.filter(record => record.status !== "LIMIT" && !exhaustedKeys.includes(record.api_key));
+    const lastGoodKey = localStorage.getItem(LAST_GOOD_API_KEY);
+    const currentKey = lastGoodKey || localStorage.getItem("nexus_api_key") || activePool[0]?.api_key || pool[0]?.api_key || null;
+    const currentRecord = pool.find(record => record.api_key === currentKey) || activePool[0] || pool[0] || null;
+    const state = {
+      totalKeys: pool.length,
+      activeKeys: activePool.length,
+      exhaustedKeys: exhaustedKeys.length,
+      currentKey,
+      currentProvider: currentRecord?.provider || null,
+      currentModel: currentRecord ? resolveModelForApiRecord(currentRecord) : null
+    };
+    window.__nexusEngineStatus = state;
+    return state;
+  } catch (e) {
+    console.error("[NEXUS ENGINE STATUS]", e);
+    return null;
+  }
+};
+
+async function syncLocalApiBackupsToServer(options = {}) {
+  if (window.__nexusApiBackupSyncPromise && !options.force) {
+    return window.__nexusApiBackupSyncPromise;
+  }
+
+  const work = (async () => {
+    const localRecords = getLocalApiBackups();
+    if (localRecords.length === 0) return { synced: 0 };
+
+    let remoteRecords = Array.isArray(options.remoteKeys) ? options.remoteKeys : null;
+    if (!remoteRecords) {
+      try {
+        const res = await fetch(`./server/api.php?action=list_api_keys`);
+        const json = await res.json();
+        if (json.success && Array.isArray(json.keys)) remoteRecords = json.keys;
+      } catch (e) {}
+    }
+
+    if (!remoteRecords) return { synced: 0 };
+
+    const remoteKeys = new Set(dedupeApiRecords(remoteRecords).map(record => record.api_key).filter(Boolean));
+    let synced = 0;
+
+    for (const record of localRecords) {
+      if (remoteKeys.has(record.api_key)) continue;
+      try {
+        const res = await fetch(`./server/api.php?action=save_api_key`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            label: record.label,
+            api_key: record.api_key,
+            provider: record.provider,
+            model: record.model
+          })
+        });
+        const json = await res.json();
+        if (json.success) {
+          remoteKeys.add(record.api_key);
+          synced++;
+        }
+      } catch (e) {}
+    }
+
+    return { synced };
+  })();
+
+  window.__nexusApiBackupSyncPromise = work.finally(() => {
+    window.__nexusApiBackupSyncPromise = null;
+  });
+
+  return window.__nexusApiBackupSyncPromise;
 }
 
 window.getApiStatusInfo = function() {
@@ -375,6 +853,32 @@ function getHistoryStore() {
   return window.storageGetJson(getHistoryKey(window.currentUser), {}) || {};
 }
 
+function getDeletedHistoryKey(user = window.currentUser) {
+  return `nexus_deleted_history_${user}`;
+}
+
+function getDeletedHistoryMap() {
+  return window.storageGetJson(getDeletedHistoryKey(), {}) || {};
+}
+
+function persistDeletedHistoryMap(map) {
+  const now = Date.now();
+  const compacted = {};
+  Object.entries(map || {}).forEach(([id, deletedAt]) => {
+    const ts = Number(deletedAt || 0);
+    if (id && ts && now - ts < HISTORY_DELETE_TOMBSTONE_TTL) compacted[id] = ts;
+  });
+  window.storageSetJson(getDeletedHistoryKey(), compacted);
+  return compacted;
+}
+
+function markHistoryDeleted(id) {
+  if (!id) return;
+  const map = getDeletedHistoryMap();
+  map[id] = Date.now();
+  persistDeletedHistoryMap(map);
+}
+
 async function setHistoryStore(value) {
   const key = getHistoryKey(window.currentUser);
   const jsonValue = JSON.stringify(value || {});
@@ -421,11 +925,19 @@ async function syncHistoryFromServer() {
     const json = await res.json();
     if (!json || !json.success || !json.history || typeof json.history !== 'object') return;
     const serverHistory = json.history;
+    const deletedHistory = persistDeletedHistoryMap(getDeletedHistoryMap());
 
     const localHistory = getHistoryStore() || {};
     let changed = false;
 
     for (const [sid, sess] of Object.entries(serverHistory)) {
+      if (deletedHistory[sid]) {
+        if (localHistory[sid]) {
+          delete localHistory[sid];
+          changed = true;
+        }
+        continue;
+      }
       if (!localHistory[sid]) {
         localHistory[sid] = sess;
         changed = true;
@@ -497,11 +1009,9 @@ function isCreditsLimitError(message) {
  */
 function markKeyExhausted(apiKey) {
   try {
-    const exhausted = JSON.parse(localStorage.getItem('nexus_exhausted_keys') || '[]');
-    if (!exhausted.includes(apiKey)) {
-      exhausted.push(apiKey);
-      localStorage.setItem('nexus_exhausted_keys', JSON.stringify(exhausted));
-    }
+    const failures = getApiKeyFailureMap();
+    failures[apiKey] = { failedAt: Date.now(), reason: "request_failed" };
+    persistApiKeyFailureMap(failures);
     fetch(`./server/api.php?action=mark_key_exhausted`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -509,6 +1019,22 @@ function markKeyExhausted(apiKey) {
     }).catch(() => {});
     console.warn('[NEXUS KEY ROTATE] Exhausted:', apiKey.substring(0, 12) + '...');
   } catch(e) {}
+}
+
+function isRecoverableApiKeyError(message, status) {
+  const text = String(message || "").toLowerCase();
+  return status === 400 ||
+    status === 401 ||
+    status === 403 ||
+    text.includes("user not found") ||
+    text.includes("invalid api key") ||
+    text.includes("invalid key") ||
+    text.includes("unauthorized") ||
+    text.includes("forbidden") ||
+    text.includes("no auth credentials") ||
+    text.includes("model not found") ||
+    text.includes("invalid model") ||
+    text.includes("not a valid model");
 }
 
 /**
@@ -521,26 +1047,309 @@ async function getKeyPoolForRetry() {
     const res = await fetch(`./server/api.php?action=list_api_keys`);
     const json = await res.json();
     if (json.success && json.keys && json.keys.length > 0) {
-      pool = json.keys.map(k => k.api_key);
-      localStorage.setItem('nexus_active_pool', JSON.stringify(pool));
+      pool = persistServerApiSnapshot(json.keys);
     }
   } catch (e) {}
-  if (pool.length === 0) pool = getActivePool();
+
+  if (pool.length === 0) pool = getLocalApiBackups();
   if (pool.length === 0) {
     const single = localStorage.getItem('nexus_api_key');
-    if (single) pool = [single];
+    if (single) pool = [normalizeApiRecord({ api_key: single })];
   }
   
-  const exhausted = JSON.parse(localStorage.getItem('nexus_exhausted_keys') || '[]');
-  let activePool = pool.filter(k => !exhausted.includes(k));
+  const exhausted = getBlockedApiKeys();
+  let activePool = pool.filter(record => record && record.status !== "LIMIT" && !exhausted.includes(record.api_key));
+  const lastGoodKey = localStorage.getItem(LAST_GOOD_API_KEY);
+  if (lastGoodKey) {
+    activePool.sort((a, b) => (b.api_key === lastGoodKey ? 1 : 0) - (a.api_key === lastGoodKey ? 1 : 0));
+  }
   
   if (activePool.length === 0 && pool.length > 0) {
-    // If all keys are exhausted, reset the exhausted list and try all of them again
-    localStorage.setItem('nexus_exhausted_keys', '[]');
-    activePool = pool;
+    activePool = pool
+      .filter(record => record && record.status !== "LIMIT")
+      .sort((a, b) => Number(getApiKeyFailureMap()[a.api_key]?.failedAt || 0) - Number(getApiKeyFailureMap()[b.api_key]?.failedAt || 0));
   }
   
   return activePool;
+}
+
+function flattenMessageContent(content) {
+  if (Array.isArray(content)) {
+    return content.map(part => {
+      if (typeof part === "string") return part;
+      if (part?.type === "text") return part.text || "";
+      if (part?.type === "image_url") return "[Image attached]";
+      return "";
+    }).filter(Boolean).join("\n");
+  }
+  return String(content || "");
+}
+
+function buildProviderMessages(provider, messages) {
+  const normalizedProvider = normalizeProviderName(provider);
+  if (normalizedProvider === "OpenRouter" || normalizedProvider === "OpenAI" || normalizedProvider === "Groq") {
+    return messages.map(message => ({
+      role: message.role === "ai" ? "assistant" : message.role,
+      content: Array.isArray(message.content)
+        ? message.content.map(part => {
+            if (typeof part === "string") return { type: "text", text: part };
+            if (part?.type === "text") return { type: "text", text: part.text || "" };
+            if (part?.type === "image_url") return { type: "image_url", image_url: part.image_url };
+            return null;
+          }).filter(Boolean)
+        : String(message.content || "")
+    }));
+  }
+
+  return messages
+    .map(message => ({
+      role: message.role === "ai" ? "assistant" : message.role,
+      content: flattenMessageContent(message.content)
+    }))
+    .filter(message => message.content);
+}
+
+function buildGeminiContents(messages) {
+  const contents = [];
+  const systemBlocks = [];
+  const flattenedMessages = buildProviderMessages("Gemini", messages);
+
+  flattenedMessages.forEach(message => {
+    const text = String(message.content || "").trim();
+    if (!text) return;
+    if (message.role === "system") {
+      systemBlocks.push(text);
+      return;
+    }
+
+    const role = message.role === "assistant" ? "model" : "user";
+    if (contents.length > 0 && contents[contents.length - 1].role === role) {
+      contents[contents.length - 1].parts.push({ text });
+    } else {
+      contents.push({ role, parts: [{ text }] });
+    }
+  });
+
+  if (systemBlocks.length > 0) {
+    const systemText = `System instructions:\n${systemBlocks.join("\n\n")}`;
+    if (contents[0] && contents[0].role === "user") contents[0].parts.unshift({ text: systemText });
+    else contents.unshift({ role: "user", parts: [{ text: systemText }] });
+  }
+
+  return contents.length > 0 ? contents : [{ role: "user", parts: [{ text: "" }] }];
+}
+
+function buildAnthropicPayload(messages, model) {
+  const anthropicMessages = [];
+  const systemBlocks = [];
+
+  buildProviderMessages("Anthropic", messages).forEach(message => {
+    const text = String(message.content || "").trim();
+    if (!text) return;
+    if (message.role === "system") {
+      systemBlocks.push(text);
+      return;
+    }
+    anthropicMessages.push({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: text
+    });
+  });
+
+  return {
+    model,
+    max_tokens: 8192,
+    temperature: parseFloat(window.NEXUS_GOD_MODE_TEMP || "1.0"),
+    system: systemBlocks.join("\n\n"),
+    messages: anthropicMessages
+  };
+}
+
+function buildProviderRequest(record, messages) {
+  const normalized = normalizeApiRecord(record);
+  const provider = normalized?.provider || "OpenRouter";
+  const apiKey = normalized?.api_key || "";
+  const model = resolveModelForApiRecord(normalized);
+  const temperature = parseFloat(window.NEXUS_GOD_MODE_TEMP || "1.0");
+  const providerMessages = buildProviderMessages(provider, messages);
+
+  switch (provider) {
+    case "OpenAI":
+      return {
+        provider,
+        model,
+        url: "https://api.openai.com/v1/chat/completions",
+        options: {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": window.location?.origin || "https://nexus-ai-beta-seven.vercel.app",
+            "X-Title": "NEXUS AI"
+          },
+          body: JSON.stringify({
+            model,
+            messages: providerMessages,
+            temperature,
+            max_tokens: 8192
+          })
+        }
+      };
+    case "Mistral":
+      return {
+        provider,
+        model,
+        url: "https://api.mistral.ai/v1/chat/completions",
+        options: {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model,
+            messages: providerMessages,
+            temperature,
+            max_tokens: 8192
+          })
+        }
+      };
+    case "Gemini":
+      return {
+        provider,
+        model,
+        url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        options: {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: buildGeminiContents(messages),
+            generationConfig: {
+              temperature,
+              maxOutputTokens: 8192
+            }
+          })
+        }
+      };
+    case "Groq":
+      return {
+        provider,
+        model,
+        url: "https://api.groq.com/openai/v1/chat/completions",
+        options: {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model,
+            messages: providerMessages,
+            temperature,
+            max_tokens: 8192
+          })
+        }
+      };
+    case "Anthropic":
+      return {
+        provider,
+        model,
+        url: "https://api.anthropic.com/v1/messages",
+        options: {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(buildAnthropicPayload(messages, model))
+        }
+      };
+    case "OpenRouter":
+    default:
+      return {
+        provider: "OpenRouter",
+        model,
+        url: OPENROUTER_API_URL,
+        options: {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model,
+            messages: providerMessages,
+            temperature,
+            max_tokens: 8192
+          })
+        }
+      };
+  }
+}
+
+function extractReplyFromProviderResponse(provider, data) {
+  if (provider === "Gemini") {
+    return (data.candidates?.[0]?.content?.parts || [])
+      .map(part => part?.text || "")
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (provider === "Anthropic") {
+    return (data.content || [])
+      .map(part => part?.text || "")
+      .filter(Boolean)
+      .join("\n");
+  }
+  return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || "";
+}
+
+function extractUsageFromProviderResponse(provider, data) {
+  if (provider === "Gemini") {
+    const usage = data.usageMetadata || {};
+    return {
+      totalTokens: Number(usage.totalTokenCount || 0),
+      totalCost: 0
+    };
+  }
+
+  if (provider === "Anthropic") {
+    const usage = data.usage || {};
+    return {
+      totalTokens: Number(usage.input_tokens || 0) + Number(usage.output_tokens || 0),
+      totalCost: 0
+    };
+  }
+
+  const usage = data.usage || {};
+  return {
+    totalTokens: Number(usage.total_tokens || usage.totalTokens || 0),
+    totalCost: Number(data.total_cost || usage.total_cost || 0)
+  };
+}
+
+function extractProviderErrorMessage(provider, data, response, fallbackText = "") {
+  if (response.status === 401) {
+    return "Invalid API Key. Please check your credentials in Settings.";
+  }
+  if (response.status === 402) {
+    return "Insufficient Credits. This API key has no balance left.";
+  }
+  if (response.status === 429) {
+    return "Rate Limit Exceeded. Please try again in a moment.";
+  }
+
+  if (provider === "Gemini") {
+    return data.error?.message || data.promptFeedback?.blockReason || fallbackText || `Request failed (${response.status})`;
+  }
+  if (provider === "Anthropic") {
+    return data.error?.message || data.error?.type || fallbackText || `Request failed (${response.status})`;
+  }
+  return data.error?.message ||
+    (typeof data.error === "string" ? data.error : "") ||
+    data.message ||
+    fallbackText ||
+    `Request failed (${response.status})`;
 }
 
 
@@ -578,9 +1387,10 @@ async function sendMessage(customText = null, options = {}) {
 
   // Python Mode or Web Mode
   if (window.pywebview?.api) {
+    updateCurrentAiModelTag("NEXUS", "local-bridge");
     window.pywebview.api.send_message(text).then(async (res) => {
       updateAiMessage(res);
-      webChatHistory.push({ role: "assistant", content: stripHtmlToText(res), responseTo: activeQuestionId });
+      webChatHistory.push({ role: "assistant", content: stripHtmlToText(res), responseTo: activeQuestionId, provider: "NEXUS", model: "local-bridge" });
       await finishAiMessage();
     }).catch(async (err) => {
       updateAiMessage("<span style='color:#ef4444;'>Error: " + err + "</span>");
@@ -627,10 +1437,12 @@ async function sendMessage(customText = null, options = {}) {
     let rawApiError = ""; // Store exact error for feedback
 
     for (let attempt = 0; attempt < keyPool.length; attempt++) {
-      const currentKey = keyPool[attempt];
-      const exhaustedSnapshot = JSON.parse(localStorage.getItem('nexus_exhausted_keys') || '[]');
+      const currentRecord = normalizeApiRecord(keyPool[attempt]);
+      const currentKey = currentRecord?.api_key || "";
+      const currentProvider = currentRecord?.provider || "OpenRouter";
+      const exhaustedSnapshot = getBlockedApiKeys();
       const isExhausted = exhaustedSnapshot.includes(currentKey);
-      const keyLabel = `Key-${attempt + 1} (${currentKey.substring(0, 8)}...)`;
+      const keyLabel = `${currentProvider} #${attempt + 1} (${currentKey.substring(0, 8)}...)`;
 
       if (attempt > 0) {
         showNotification(`🔄 Rotating to ${keyLabel}...`, "info");
@@ -638,30 +1450,26 @@ async function sendMessage(customText = null, options = {}) {
       }
 
       try {
-        const response = await fetch(OPENROUTER_API_URL, {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${currentKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: localStorage.getItem("nexus_selected_model") || "deepseek/deepseek-chat",
-            messages: messages,
-            temperature: parseFloat(window.NEXUS_GOD_MODE_TEMP || "1.0"),
-            max_tokens: 8192
-          })
-        });
+        const providerRequest = buildProviderRequest(currentRecord, messages);
+        updateCurrentAiModelTag(providerRequest.provider, providerRequest.model);
+        const response = await fetch(providerRequest.url, providerRequest.options);
 
-        const data = await response.json();
+        const responseText = await response.text();
+        let data = {};
+        try {
+          data = responseText ? JSON.parse(responseText) : {};
+        } catch (parseError) {
+          data = { raw: responseText };
+        }
 
-        if (data.choices && data.choices[0]) {
+        const reply = extractReplyFromProviderResponse(providerRequest.provider, data);
+        if (reply) {
           // ✅ SUCCESS
-          const reply = data.choices[0].message.content;
+          const usageStats = extractUsageFromProviderResponse(providerRequest.provider, data);
           
           // --- Extract & Update Usage Stats ---
-          const usage = data.usage || {};
-          const totalTokens = usage.total_tokens || 0;
-          const totalCost = data.total_cost || usage.total_cost || 0;
+          const totalTokens = usageStats.totalTokens || 0;
+          const totalCost = usageStats.totalCost || 0;
 
           if (totalTokens > 0) {
             fetch(`./server/api.php?action=update_usage`, {
@@ -675,26 +1483,28 @@ async function sendMessage(customText = null, options = {}) {
             }).catch(e => console.warn("Failed to sync usage", e));
           }
 
-          webChatHistory.push({ role: "assistant", content: reply, responseTo: activeQuestionId });
+          webChatHistory.push({
+            role: "assistant",
+            content: reply,
+            responseTo: activeQuestionId,
+            provider: providerRequest.provider,
+            model: providerRequest.model
+          });
           updateAiMessage(reply.replace(/\n/g, "<br>"));
           success = true;
-          // Clear exhausted status if this key worked again
-          if (isExhausted) {
-            const updated = JSON.parse(localStorage.getItem('nexus_exhausted_keys') || '[]').filter(k => k !== currentKey);
-            localStorage.setItem('nexus_exhausted_keys', JSON.stringify(updated));
-          }
+          rememberSuccessfulApiKey(currentKey);
           if (attempt > 0) showNotification(`✅ ${keyLabel} responded successfully!`, "success");
           break;
 
         } else {
-          const errMsg = data.error?.message || (typeof data.error === 'string' ? data.error : "Failed to get response from AI.");
+          const errMsg = extractProviderErrorMessage(providerRequest.provider, data, response, responseText || "Failed to get response from AI.");
           rawApiError = errMsg; // store actual openrouter message
 
-          if (isCreditsLimitError(errMsg) || response.status === 402 || response.status === 429) {
+          if (isCreditsLimitError(errMsg) || response.status === 402 || response.status === 429 || isRecoverableApiKeyError(errMsg, response.status)) {
             markKeyExhausted(currentKey);
             const remaining = keyPool.length - attempt - 1;
             if (remaining > 0) {
-              showNotification(`⚠ ${keyLabel} limit reached. Auto-switching to next key...`, "info");
+              showNotification(`⚠ ${keyLabel} failed. Auto-switching to next key...`, "info");
               lastError = errMsg;
               continue; // try next key
             } else {
@@ -732,10 +1542,14 @@ function appendMessage(role, content, meta = {}) {
   const questionId = meta.questionId || generateQuestionId();
   const contentHtml = role === "user" ? String(content || "").replace(/\n/g, "<br>") : String(content || "");
   const messageKey = role === "user" ? questionId : `m_${Date.now()}`;
+  const aiModelMeta = role === "ai" ? normalizeAiModelMeta(meta) : null;
   
   if (role === "user") {
     msgDiv.dataset.questionId = questionId;
     msgDiv.dataset.versionIndex = String(meta.versionIndex || 0);
+  } else if (role === "ai" && aiModelMeta) {
+    msgDiv.dataset.provider = aiModelMeta.provider;
+    msgDiv.dataset.model = aiModelMeta.model;
   }
 
   const versions = role === "user" ? (messageVersions[questionId] || [stripHtmlToText(contentHtml)]) : [];
@@ -747,6 +1561,11 @@ function appendMessage(role, content, meta = {}) {
       ${role === 'user' ? '<i class="fa-solid fa-user"></i>' : '<img src="./extracted_icons/icon32.png" alt="NEXUS" style="width:100%; height:100%; object-fit:contain;">'}
     </div>
     <div style="flex:1; display:flex; flex-direction:column;" id="msg-wrap-${messageKey}">
+      ${role === 'ai' && aiModelMeta ? `
+        <div class="ai-model-tag" data-provider="${escapeHtml(aiModelMeta.provider)}" data-model="${escapeHtml(aiModelMeta.model)}">
+          ${escapeHtml(formatAiModelTag(aiModelMeta.provider, aiModelMeta.model))}
+        </div>
+      ` : ''}
       <div class="msg-content" id="${role === 'ai' ? 'current-ai-content' : `u-content-${questionId}`}">
         ${meta.files && meta.files.length > 0 ? `
           <div class="msg-files" style="display:block; width:100%; overflow:hidden; margin-bottom:5px;">
@@ -867,13 +1686,21 @@ function removeSelectedFile(idx) {
 function createAiMessagePlaceholder() {
   const oldContent = document.getElementById("current-ai-content");
   if (oldContent) oldContent.id = "completed-" + Date.now();
+  const oldTag = document.getElementById("current-ai-model-tag");
+  if (oldTag) oldTag.id = "completed-model-tag-" + Date.now();
+  const aiModelMeta = getCurrentAiModelMeta();
   const msgDiv = document.createElement("div");
   msgDiv.className = `message ai-msg`;
   msgDiv.style.alignItems = "center"; // Align logo and thinking text perfectly
+  msgDiv.dataset.provider = aiModelMeta.provider;
+  msgDiv.dataset.model = aiModelMeta.model;
   msgDiv.innerHTML = `
     <div class="msg-icon" style="border:none;"><img src="./extracted_icons/icon32.png" alt="NEXUS" style="width: 100%; height: 100%;"></div>
     <div style="flex:1; display:flex; flex-direction:column;">
-      <div class="msg-content" id="current-ai-content">
+      <div class="ai-model-tag" id="current-ai-model-tag" data-provider="${escapeHtml(aiModelMeta.provider)}" data-model="${escapeHtml(aiModelMeta.model)}">
+        ${escapeHtml(formatAiModelTag(aiModelMeta.provider, aiModelMeta.model))}
+      </div>
+      <div class="msg-content thinking-content" id="current-ai-content">
         <div class="typing">
           <span class="thinking-text">Thinking</span>
           <div class="typing-dots">
@@ -931,6 +1758,7 @@ async function refreshJailbreakTable() {
           <td><b style="color:var(--neon-blue)">${jb.name}</b></td>
           <td style="text-align:center">${activeHtml}</td>
           <td style="text-align:right">
+            <button class="btn-del" style="color:#ef4444; background:transparent; margin-right:5px;" onclick="deleteJailbreak(${jb.id})"><i class="fa-solid fa-trash"></i></button>
             <button class="btn-del" style="color:#65f97d; background:transparent;" onclick="editJailbreak(${jb.id}, \`${jb.name}\`, \`${jb.content.replace(/`/g, '\\`')}\`)"><i class="fa-solid fa-pen-to-square"></i></button>
           </td>
         </tr>
@@ -939,16 +1767,20 @@ async function refreshJailbreakTable() {
   } catch (e) {}
 }
 
-async function addNewJailbreak() {
-    const name = prompt("Jailbreak Identifier Name:");
-    const content = prompt("Input Full Jailbreak Directive Content:");
-    if (!name || !content) return;
-    await fetch(`./server/api.php?action=save_jailbreak`, {
-        method: 'POST',
-        body: JSON.stringify({ name, content })
-    });
-    showNotification("CORE OVERRIDE ADDED", "success");
+async function deleteJailbreak(id) {
+    if (!confirm("Remove this Jailbreak Prompt?")) return;
+    await fetch(`./server/api.php?action=delete_jailbreak&id=${id}`);
+    showNotification("Jailbreak Removed", "info");
+    await fetchActiveJailbreak();
     refreshJailbreakTable();
+}
+
+async function addNewJailbreak() {
+    document.getElementById('jailbreakEditId').value = "";
+    document.getElementById('jailbreakModalTitle').textContent = "NEW JAILBREAK";
+    document.getElementById('jailbreakNameInput').value = "";
+    document.getElementById('jailbreakContentInput').value = "";
+    document.getElementById('jailbreakEditModal').classList.add('active');
 }
 
 async function toggleJailbreak(id) {
@@ -958,15 +1790,37 @@ async function toggleJailbreak(id) {
     refreshJailbreakTable();
 }
 
-async function editJailbreak(id, oldName, oldContent) {
-    const name = prompt("Edit Identifier Name:", oldName);
-    const content = prompt("Edit Jailbreak Directive Content:", oldContent);
-    if (!name || !content) return;
+function editJailbreak(id, oldName, oldContent) {
+    document.getElementById('jailbreakEditId').value = id;
+    document.getElementById('jailbreakModalTitle').textContent = "EDIT JAILBREAK";
+    document.getElementById('jailbreakNameInput').value = oldName;
+    document.getElementById('jailbreakContentInput').value = oldContent;
+    document.getElementById('jailbreakEditModal').classList.add('active');
+}
+
+function closeJailbreakModal() {
+    document.getElementById('jailbreakEditModal').classList.remove('active');
+}
+
+async function saveJailbreakModal() {
+    const id = document.getElementById('jailbreakEditId').value;
+    const name = document.getElementById('jailbreakNameInput').value.trim();
+    const content = document.getElementById('jailbreakContentInput').value.trim();
+
+    if (!name || !content) {
+        showNotification("Please fill in all fields", "error");
+        return;
+    }
+
+    const payload = id ? { id, name, content } : { name, content };
+
     await fetch(`./server/api.php?action=save_jailbreak`, {
         method: 'POST',
-        body: JSON.stringify({ id, name, content })
+        body: JSON.stringify(payload)
     });
-    showNotification("JAILBREAK REWRITTEN", "success");
+
+    showNotification(id ? "JAILBREAK REWRITTEN" : "CORE OVERRIDE ADDED", "success");
+    closeJailbreakModal();
     await fetchActiveJailbreak();
     refreshJailbreakTable();
 }
@@ -979,7 +1833,149 @@ async function fetchActiveJailbreak() {
             window.BASE_PERSONA = json.jailbreak.content;
             console.log("[NEXUS] BASE_PERSONA UPDATED FROM CORE");
         }
-    } catch(e) {}
+  } catch(e) {}
+}
+
+function renderApiUsageSummary(records = []) {
+  const summaryEl = document.getElementById("apiUsageSummary");
+  if (!summaryEl) return;
+
+  const normalizedKeys = dedupeApiRecords(records);
+  if (normalizedKeys.length === 0) {
+    summaryEl.innerHTML = "";
+    return;
+  }
+
+  const exhaustedKeys = getBlockedApiKeys();
+  const activeKeys = normalizedKeys.filter(record => record.status !== "LIMIT" && !exhaustedKeys.includes(record.api_key));
+  const freeModelCount = normalizedKeys.filter(record => isFreeFocusedModel(resolveModelForApiRecord(record), record.provider)).length;
+  const totalTokens = normalizedKeys.reduce((sum, record) => sum + Number(record.usage_tokens || 0), 0);
+  const activeTokens = activeKeys.reduce((sum, record) => sum + Number(record.usage_tokens || 0), 0);
+  const totalUsd = normalizedKeys.reduce((sum, record) => sum + Number(record.usage_usd || 0), 0);
+
+  summaryEl.innerHTML = `
+    <div class="api-stat-card">
+      <div class="api-stat-label">Total Key</div>
+      <div class="api-stat-value">${normalizedKeys.length}</div>
+      <div class="api-stat-note">${activeKeys.length} aktif, ${Math.max(0, normalizedKeys.length - activeKeys.length)} limit</div>
+    </div>
+    <div class="api-stat-card">
+      <div class="api-stat-label">Model Gratis</div>
+      <div class="api-stat-value">${freeModelCount}/${normalizedKeys.length}</div>
+      <div class="api-stat-note">Dropdown fokus varian gratis</div>
+    </div>
+    <div class="api-stat-card">
+      <div class="api-stat-label">Total Token</div>
+      <div class="api-stat-value">${formatTokenCount(totalTokens)}</div>
+      <div class="api-stat-note">${formatTokenCount(activeTokens)} token dari key aktif</div>
+    </div>
+    <div class="api-stat-card">
+      <div class="api-stat-label">Biaya Tercatat</div>
+      <div class="api-stat-value">$${totalUsd.toFixed(4)}</div>
+      <div class="api-stat-note">Rp ${formatIdrFromUsd(totalUsd)}</div>
+    </div>
+  `;
+}
+
+function buildApiModelSelectorMarkup(record) {
+  const currentModel = resolveModelForApiRecord(record);
+  const modelOptions = getModelOptionsForProvider(record.provider, currentModel);
+  const modelMeta = getModelMeta(record.provider, currentModel);
+  const badgeClass = isFreeFocusedModel(currentModel, record.provider) ? "free" : "custom";
+  const optionMarkup = modelOptions.map(option => {
+    const selected = option.value === currentModel ? "selected" : "";
+    const label = `${option.label}${option.badge ? ` [${option.badge}]` : ""}`;
+    return `<option value="${escapeHtml(option.value)}" ${selected}>${escapeHtml(label)}</option>`;
+  }).join("");
+
+  return `
+    <select class="api-model-select" onchange='updateApiModel(${JSON.stringify(record.api_key)}, this.value)'>
+      ${optionMarkup}
+    </select>
+    <div class="api-model-meta">
+      <span class="api-model-badge ${badgeClass}">${escapeHtml(modelMeta.badge)}</span>
+      <span class="api-model-note">${escapeHtml(modelMeta.note)}</span>
+    </div>
+  `;
+}
+
+async function updateApiModel(apiKey, nextModel) {
+  const normalizedModel = String(nextModel || "").trim();
+  if (!apiKey || !normalizedModel) return;
+
+  const localRecords = dedupeApiRecords(getLocalApiBackups());
+  const targetRecord = localRecords.find(record => record.api_key === apiKey);
+  if (!targetRecord) return;
+
+  targetRecord.model = normalizedModel;
+  persistApiRecordsLocally(localRecords);
+  window.ensureUserApiAvailability();
+  window.updateEngineStatus();
+
+  const tbody = document.getElementById("apiTableBody");
+  if (tbody) renderApiTableRows(tbody, localRecords);
+
+  try {
+    const res = await fetch(`./server/api.php?action=save_api_key`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        label: targetRecord.label,
+        api_key: targetRecord.api_key,
+        provider: targetRecord.provider,
+        model: normalizedModel
+      })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message || "Failed to update model");
+    showNotification("MODEL API UPDATED", "success");
+    await refreshApiTable();
+  } catch (e) {
+    showNotification("SERVER OFFLINE. MODEL DISIMPAN LOKAL.", "info");
+  }
+}
+
+function renderApiTableRows(tbody, keys, options = {}) {
+  const normalizedKeys = dedupeApiRecords(keys);
+  if (!tbody) return;
+
+  renderApiUsageSummary(normalizedKeys);
+
+  if (normalizedKeys.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted); opacity:0.6;">NO API KEYS FOUND. CLICK "FORCE SYNC" TO RE-GENERATE.</td></tr>`;
+    return;
+  }
+
+  const exhaustedKeys = getBlockedApiKeys();
+  tbody.innerHTML = normalizedKeys.map(record => {
+    const apiKeyVal = record.api_key || "";
+    const isLimit = record.status === "LIMIT" || exhaustedKeys.includes(apiKeyVal);
+    const statusHtml = isLimit
+      ? `<span class="badge-limit">LIMIT</span>`
+      : `<span class="badge-active">ACTIVE</span>`;
+
+    return `
+      <tr>
+        <td style="color:#facc15">${escapeHtml(record.provider || "N/A")}</td>
+        <td>${buildApiModelSelectorMarkup(record)}</td>
+        <td style="color:var(--neon-blue); font-weight:700">${escapeHtml(record.label || "Unnamed")}</td>
+        <td><code style="opacity:0.6">${escapeHtml(apiKeyVal.substring(0, 10))}...</code></td>
+        <td style="text-align:center;">${statusHtml}</td>
+        <td style="color:#65f97d">
+          <div style="font-size:0.8rem">$${parseFloat(record.usage_usd || 0).toFixed(4)}</div>
+          <div style="font-size:0.7rem; opacity:0.8; color:var(--text-muted)">Rp ${formatIdrFromUsd(record.usage_usd || 0)}</div>
+          <div class="api-token-meta">${formatTokenCount(record.usage_tokens || 0)} token terpakai</div>
+        </td>
+        <td style="text-align:right">
+          <button class="btn-del" onclick="deleteApiKey(${record.id || 0})"><i class="fa-solid fa-trash"></i></button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  if (options.localFallback) {
+    showNotification("SERVER OFFLINE. DISPLAYING LOCAL API BACKUP.", "info");
+  }
 }
 
 async function refreshApiTable() {
@@ -990,49 +1986,42 @@ async function refreshApiTable() {
     const res = await fetch(`./server/api.php?action=list_api_keys`);
     const json = await res.json();
     if (!json.success) {
+      renderApiUsageSummary([]);
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:#ef4444;">SERVER ERROR: ${json.message || 'Unknown error'}</td></tr>`;
       return;
     }
-    
-    const keys = json.keys || [];
+
+    let keys = dedupeApiRecords(json.keys || []);
     if (keys.length === 0) {
+      const localBackup = getLocalApiBackups();
+      if (localBackup.length > 0) {
+        await syncLocalApiBackupsToServer({ force: true, remoteKeys: [] });
+        const retryRes = await fetch(`./server/api.php?action=list_api_keys`);
+        const retryJson = await retryRes.json();
+        if (retryJson.success) keys = dedupeApiRecords(retryJson.keys || []);
+      }
+    }
+
+    if (keys.length === 0) {
+      renderApiUsageSummary([]);
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted); opacity:0.6;">NO API KEYS FOUND. CLICK "FORCE SYNC" TO RE-GENERATE.</td></tr>`;
       return;
     }
-    
-    // Sync pool for all (for rotation logic)
-    localStorage.setItem('nexus_active_pool', JSON.stringify(keys.map(k => k.api_key)));
-    ensureUserApiAvailability();
-    updateEngineStatus();
 
-    // Read exhausted state directly here for real-time visual syncing
-    const exhaustedKeys = JSON.parse(localStorage.getItem('nexus_exhausted_keys') || '[]');
-
-    tbody.innerHTML = keys.map(k => {
-      const apiKeyVal = k.api_key || '';
-      const isLimit = exhaustedKeys.includes(apiKeyVal);
-      const statusHtml = isLimit 
-        ? `<span class="badge-limit">LIMIT</span>`
-        : `<span class="badge-active">ACTIVE</span>`;
-
-      return `
-      <tr>
-        <td style="color:#facc15">${k.provider || 'N/A'}</td>
-        <td style="opacity:0.8">${k.model || '-'}</td>
-        <td style="color:var(--neon-blue); font-weight:700">${k.label || 'Unnamed'}</td>
-        <td><code style="opacity:0.6">${apiKeyVal.substring(0, 10)}...</code></td>
-        <td style="text-align:center;">${statusHtml}</td>
-        <td style="color:#65f97d">
-          <div style="font-size:0.8rem">$${parseFloat(k.usage_usd || 0).toFixed(4)}</div>
-          <div style="font-size:0.7rem; opacity:0.8; color:var(--text-muted)">Rp ${Math.round(parseFloat(k.usage_usd || 0) * 16000).toLocaleString('id-ID')}</div>
-        </td>
-        <td style="text-align:right">
-          <button class="btn-del" onclick="deleteApiKey(${k.id || 0})"><i class="fa-solid fa-trash"></i></button>
-        </td>
-      </tr>
-    `}).join("");
+    persistServerApiSnapshot(keys);
+    window.ensureUserApiAvailability();
+    window.updateEngineStatus();
+    renderApiTableRows(tbody, keys);
   } catch (e) {
     console.error("[NEXUS API MANAGER] Render Error:", e);
+    const localBackup = getLocalApiBackups();
+    if (localBackup.length > 0) {
+      renderApiTableRows(tbody, localBackup, { localFallback: true });
+      window.ensureUserApiAvailability();
+      window.updateEngineStatus();
+      return;
+    }
+    renderApiUsageSummary([]);
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:#ef4444;">CONNECTION ERROR: UNABLE TO SYNC WITH SERVER</td></tr>`;
   }
 }
@@ -1041,25 +2030,34 @@ async function addNewApiKey() {
     const key = prompt("PASTE YOUR API KEY (sk-...):");
     if (!key) return;
 
-    let provider = "OpenAI";
-    let model = "gpt-4o-mini";
+    let provider = normalizeProviderName("", key);
+    let model = getDefaultModelForProvider(provider);
     let label = "AUTO-KEY";
 
-    if (key.startsWith("sk-or-v1-")) {
-        provider = "OpenRouter";
-        model = "deepseek/deepseek-chat";
+    if (provider === "OpenRouter") {
         label = "OR-KEY-" + key.substring(9, 13).toUpperCase();
-    } else if (key.startsWith("ms-")) {
-        provider = "Mistral";
-        model = "mistral-large-latest";
+    } else if (provider === "Mistral") {
         label = "MS-KEY-" + key.substring(3, 7).toUpperCase();
+    } else if (provider === "Gemini") {
+        label = "GM-KEY-" + key.substring(0, 4).toUpperCase();
+    } else if (provider === "Groq") {
+        label = "GQ-KEY-" + key.substring(4, 8).toUpperCase();
+    } else if (provider === "Anthropic") {
+        label = "AN-KEY-" + key.substring(7, 11).toUpperCase();
+    } else if (provider === "OpenAI") {
+        label = "OA-KEY-" + key.substring(3, 7).toUpperCase();
     }
     
     showNotification("IDENTIFYING KEY & SYNCING...", "info");
+    const localRecord = normalizeApiRecord({ label, api_key: key, provider, model, status: "active" });
+    persistApiRecordsLocally([...getLocalApiBackups(), localRecord]);
+    window.ensureUserApiAvailability();
+    window.updateEngineStatus();
 
     try {
         const res = await fetch(`./server/api.php?action=save_api_key`, {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ label, api_key: key, provider: provider, model: model })
         });
         const json = await res.json();
@@ -1070,7 +2068,8 @@ async function addNewApiKey() {
             showNotification("SAVE FAILED: " + json.message, "error");
         }
     } catch (e) {
-        showNotification("CONNECTION ERROR", "error");
+        showNotification("SERVER OFFLINE. KEY SAVED LOCALLY AND WILL SYNC LATER.", "info");
+        await refreshApiTable();
     }
 }
 
@@ -1087,6 +2086,7 @@ window.forceReseedKeys = async () => {
         const res = await fetch(`./server/api.php?action=force_reseed_keys`);
         const json = await res.json();
         if (json.success) {
+            await syncLocalApiBackupsToServer({ force: true });
             showNotification("API KEYS SYNCED SUCCESSFULLY!", "success");
             await refreshApiTable();
         } else {
@@ -1245,7 +2245,9 @@ async function saveChatToLocalStorage() {
     role: msg.classList.contains("user-msg") ? "user" : (msg.classList.contains("system-msg") ? "system" : "ai"),
     content: msg.querySelector(".msg-content")?.innerHTML || "",
     questionId: msg.dataset.questionId,
-    versionIndex: msg.dataset.versionIndex ? Number(msg.dataset.versionIndex) : undefined
+    versionIndex: msg.dataset.versionIndex ? Number(msg.dataset.versionIndex) : undefined,
+    provider: msg.dataset.provider || msg.querySelector(".ai-model-tag")?.dataset.provider || undefined,
+    model: msg.dataset.model || msg.querySelector(".ai-model-tag")?.dataset.model || undefined
   }));
   allChats[currentSessionId] = {
     title: stripHtmlToText(chatMessages.find(m => m.role === "user")?.content || "").slice(0, 30) || "Empty Session",
@@ -1332,7 +2334,7 @@ window.loadChatSession = (id) => {
       appendMessage("user", m.content, { questionId: m.questionId, versionIndex: m.versionIndex });
       webChatHistory.push({ role: "user", content: stripHtmlToText(m.content), questionId: m.questionId });
     } else {
-      appendMessage("ai", m.content);
+      appendMessage("ai", m.content, { provider: m.provider, model: m.model });
       webChatHistory.push({ role: "assistant", content: stripHtmlToText(m.content) });
     }
   });
@@ -1353,10 +2355,19 @@ window.deleteCurrentChat = async () => {
     const id = window.menuActiveSession;
     if(!id || !confirm("Delete this session?")) return;
     const store = getHistoryStore();
+    if (!store[id]) {
+        showNotification("Chat session not found or already deleted.", "info");
+        window.menuActiveSession = null;
+        refreshHistorySidebar();
+        return;
+    }
+    markHistoryDeleted(id);
     delete store[id];
     await setHistoryStore(store);
     if(currentSessionId === id) resetActiveChatState();
+    window.menuActiveSession = null;
     refreshHistorySidebar();
+    showNotification("Chat history deleted.", "success");
 };
 
 let allRegisteredUsers = [];
@@ -1529,15 +2540,16 @@ window.syncSidebarProfile = () => {
         if(roleEl) {
             roleEl.textContent = `[${session.role.toUpperCase()}]`;
             roleEl.style.display = "inline-block";
-            // Ensure visual consistency for Admin
             if(session.role === 'admin') roleEl.style.color = "var(--neon-blue)";
             else roleEl.style.color = "rgba(255,255,255,0.6)";
         }
+        window.restoreAdminSurface(session.role);
     } else {
         if(unEl) unEl.textContent = 'GUEST';
         if(emEl) emEl.textContent = '---';
         if(phEl) phEl.textContent = '---';
         if(roleEl) roleEl.style.display = "none";
+        window.restoreAdminSurface("user");
     }
 };
 
@@ -1548,7 +2560,10 @@ window.syncSessionFromServer = async () => {
         const json = await res.json();
         if (json.success && json.user) {
             const oldSession = window.getStoredSession() || {};
-            const newSession = { ...oldSession, ...json.user };
+            const rawSession = { ...oldSession, ...json.user };
+            const newSession = window.NexusUpdateCore
+              ? window.NexusUpdateCore.adapt("session.v1", rawSession, rawSession)
+              : rawSession;
             localStorage.setItem("nexus_session", JSON.stringify(newSession));
             window.syncSidebarProfile();
             // If settings modal is open and on profile tab, refresh inputs
@@ -1764,12 +2779,12 @@ function enterSystem(role) {
   window.currentRole = role;
   
   // Security Enforcement: Use 'hidden' attribute instead of 'display' style directly
-  const adminTabs = document.querySelectorAll(".admin-only-tab");
-  const adminSections = document.querySelectorAll(".admin-only-section");
-  const isActuallyAdmin = (role === "admin");
-  
-  adminTabs.forEach(t => isActuallyAdmin ? t.removeAttribute("hidden") : t.setAttribute("hidden", "true"));
-  adminSections.forEach(s => isActuallyAdmin ? s.removeAttribute("hidden") : s.setAttribute("hidden", "true"));
+  const isActuallyAdmin = window.restoreAdminSurface(role);
+  if (window.NexusUpdateCore) {
+    window.NexusUpdateCore.runMigrations();
+    window.NexusUpdateCore.runGuard("legacy-public-api");
+    window.NexusUpdateCore.runGuard("admin-surface", { roleHint: role });
+  }
 
   refreshHistorySidebar();
   syncHistoryFromServer();
@@ -1799,7 +2814,6 @@ function enterSystem(role) {
           }
       }, 2500);
   }
-  
   if (isActuallyAdmin) {
     setInterval(() => {
         if(document.getElementById("settingsModal").classList.contains("active")) {
@@ -1815,7 +2829,7 @@ function enterSystem(role) {
         }
     }, 3000);
   }
-  
+
   // Global Pulse: High-frequency sync for all users across any device/browser
   setInterval(() => {
     if (window.currentUser) {
@@ -1866,7 +2880,10 @@ window.forceGlobalSync = async () => {
     setTimeout(() => { if(icon) icon.classList.remove("fa-spin"); }, 500);
 };
 
+const SYSTEM_CHANGELOG_SOURCE = "docs/DELTA_UPDATE_CHANGELOG.md";
 const changelogData = [
+  { date: "2026-05-01", title: "Active AI Model Tag & Complete Update Log", desc: "AI response bubbles now show the active provider/model tag, and the system log loads internal changelog records so every system update can be traced.", tag: "v8.5.2", level: "user" },
+  { date: "2026-05-01", title: "API Key Rotation and Chat History Delete Hotfix", desc: "Chat now rotates past invalid API keys, OpenRouter metadata stays compatible, and deleted history sessions are tombstoned so sync cannot restore them.", tag: "v8.5.1", level: "user" },
   { date: "2026-04-09 15:25", title: "UI Global Symmetry", desc: "Unified message bubble backgrounds and glassmorphism effects for a seamless chat experience.", tag: "v8.4", level: "user" },
   { date: "2026-04-09 15:15", title: "Core Jailbreak Manager", desc: "Implemented dynamic system prompt override system. Admin can now switch AI personas in real-time via dashboard.", tag: "v8.3", level: "admin" },
   { date: "2026-04-09 07:48", title: "Realtime Sync Architecture", desc: "Implemented continuous background synchronization and zero-reload interface refreshes.", tag: "v8.2", level: "user" },
@@ -1875,20 +2892,82 @@ const changelogData = [
   { date: "2026-04-07", title: "System GPS Validation", desc: "Added location tracking coordinate system to restrict proxy logins.", tag: "v7.9", level: "admin" }
 ];
 
-window.openLastUpdateModal = () => {
+function parseInternalChangelog(markdown) {
+    const entries = [];
+    const sections = String(markdown || "").split(/^##\s+/m).slice(1);
+    sections.forEach(section => {
+        const lines = section.trim().split(/\r?\n/);
+        const heading = lines.shift() || "";
+        const match = heading.match(/^(\d{4}-\d{2}-\d{2})(?:\s+-\s+(.+))?/);
+        if (!match) return;
+
+        const title = (match[2] || "System Update").trim();
+        const bullets = [];
+        let inGoalBlock = false;
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (/^(Tujuan|Kompatibilitas|Fitur lama yang dijaga):/i.test(trimmed)) {
+                inGoalBlock = true;
+                continue;
+            }
+            if (/^(File berubah|Aturan update berikutnya|##|#)/i.test(trimmed)) inGoalBlock = false;
+            if (inGoalBlock && trimmed.startsWith("- ")) bullets.push(trimmed.replace(/^-+\s*/, ""));
+            if (bullets.length >= 3) break;
+        }
+
+        const desc = bullets.length > 0
+            ? bullets.join(" ")
+            : "Internal system update recorded in the delta update changelog.";
+
+        entries.push({
+            date: match[1],
+            title,
+            desc,
+            tag: title.includes("Active AI Model") ? "v8.5.2" : (title.includes("Hotfix") ? "v8.5.1" : "delta"),
+            level: /admin|api|backend|key|server/i.test(`${title} ${desc}`) ? "admin" : "user"
+        });
+    });
+    return entries;
+}
+
+async function getCompleteChangelogData() {
+    const merged = [...changelogData];
+    try {
+        const res = await fetch(`${SYSTEM_CHANGELOG_SOURCE}?v=${Date.now()}`, { cache: "no-store" });
+        if (res.ok) merged.unshift(...parseInternalChangelog(await res.text()));
+    } catch (e) {
+        console.warn("[NEXUS CHANGELOG] Falling back to embedded changelog", e);
+    }
+
+    const seen = new Set();
+    return merged
+        .filter(log => {
+            const key = `${log.date}|${log.title}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+
+function renderChangelogEntries(container, logs, isActuallyAdmin) {
+    const filteredData = logs.filter(log => isActuallyAdmin || log.level === "user");
+    container.innerHTML = filteredData.map(log => `
+        <div class="changelog-entry">
+            <span class="changelog-time">${escapeHtml(log.date)} <span style="font-size:0.6rem;opacity:0.5">(Sinkronisasi Server)</span> ${log.level === 'admin' ? '<span class="badge-role" style="font-size:0.5rem; padding:1px 4px;">ADMIN ONLY</span>' : ''}</span>
+            <span class="changelog-title">${escapeHtml(log.title)} <span class="changelog-tag">${escapeHtml(log.tag)}</span></span>
+            <div class="changelog-desc">${escapeHtml(log.desc)}</div>
+        </div>
+    `).join("");
+}
+
+window.openLastUpdateModal = async () => {
     window.forceGlobalSync();
     const container = document.getElementById("changelogContainer");
     if(container) {
         const isActuallyAdmin = (window.currentRole === "admin");
-        const filteredData = changelogData.filter(log => isActuallyAdmin || log.level === "user");
-
-        container.innerHTML = filteredData.map(log => `
-            <div class="changelog-entry">
-                <span class="changelog-time">${log.date} <span style="font-size:0.6rem;opacity:0.5">(Sinkronisasi Server)</span> ${log.level === 'admin' ? '<span class="badge-role" style="font-size:0.5rem; padding:1px 4px;">ADMIN ONLY</span>' : ''}</span>
-                <span class="changelog-title">${log.title} <span class="changelog-tag">${log.tag}</span></span>
-                <div class="changelog-desc">${log.desc}</div>
-            </div>
-        `).join("");
+        container.innerHTML = `<div class="changelog-entry"><span class="changelog-title">Loading update history...</span><div class="changelog-desc">Reading internal delta changelog.</div></div>`;
+        renderChangelogEntries(container, await getCompleteChangelogData(), isActuallyAdmin);
     }
     document.getElementById("changelogModal").classList.add("active");
 };
@@ -1995,19 +3074,23 @@ window.openReportModal = () => {
 };
 
 window.switchReportTab = (tab) => {
-    document.getElementById('tabSubmitReport').classList.remove('active');
-    document.getElementById('tabViewReports').classList.remove('active');
+    const submitTab = document.getElementById('tabSubmitReport');
+    const viewTab = document.getElementById('tabViewReports');
+    if (submitTab) submitTab.classList.remove('active');
+    if (viewTab) viewTab.classList.remove('active');
     
-    document.getElementById('report-view-submit').style.display = 'none';
-    document.getElementById('report-view-list').style.display = 'none';
+    const submitView = document.getElementById('report-view-submit');
+    const listView = document.getElementById('report-view-list');
+    if (submitView) submitView.style.display = 'none';
+    if (listView) listView.style.display = 'none';
     
-    if(tab === 'submit') {
-        document.getElementById('tabSubmitReport').classList.add('active');
-        document.getElementById('report-view-submit').style.display = 'flex';
-    } else {
-        document.getElementById('tabViewReports').classList.add('active');
-        document.getElementById('report-view-list').style.display = 'flex';
+    if(tab === 'view' && viewTab && listView) {
+        viewTab.classList.add('active');
+        listView.style.display = 'flex';
         fetchAndRenderReports();
+    } else {
+        if (submitTab) submitTab.classList.add('active');
+        if (submitView) submitView.style.display = 'flex';
     }
 };
 
@@ -2179,6 +3262,7 @@ function populateGroupProvinces() {
 
 window.toggleGroupChat = () => {
     const container = document.getElementById('groupChatContainer');
+    if (!container) return;
     if (container.style.display === 'none') {
         container.style.display = 'flex';
         initGroupChatUI();
@@ -2357,8 +3441,8 @@ window.sendGroupMessage = async (e) => {
 
 async function moderateGroupMessage(text) {
     try {
-        const apiKeys = JSON.parse(localStorage.getItem('nexus_api_keys') || '[]');
-        const activeKey = apiKeys.find(k => k.status === 'ACTIVE')?.key;
+        const apiKeys = getLocalApiBackups();
+        const activeKey = apiKeys.find(k => k.provider === "Gemini" && k.status === "ACTIVE")?.api_key;
         if (!activeKey) return true;
 
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${activeKey}`, {
@@ -2402,5 +3486,3 @@ window.viewFullImage = (src) => {
     img.src = src;
     modal.classList.add('active');
 };
-
-
