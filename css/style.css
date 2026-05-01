@@ -1948,39 +1948,35 @@ a { text-decoration: none; color: inherit; }
   background: var(--neon-blue);
 }
 
-/* Device View Toggle Styles */
 .device-toggle-container {
   position: fixed;
   top: 12px;
-  right: 125px;
+  right: 66px;
   display: flex;
-  background: rgba(10, 10, 10, 0.8);
-  border: 1px solid rgba(0, 243, 255, 0.3);
-  border-radius: 30px;
-  padding: 5px;
+  background: transparent;
+  border: none;
   z-index: 10005;
-  backdrop-filter: blur(10px);
-  gap: 5px;
+  gap: 10px;
   transition: opacity 0.3s ease;
 }
 .device-btn {
   background: transparent;
   color: var(--text-muted);
-  border: none;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  border: 1px solid rgba(0, 243, 255, 0.24);
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.1rem;
+  font-size: 1rem;
   transition: 0.3s;
 }
 .device-btn.active, .device-btn:hover {
-  background: rgba(0, 243, 255, 0.1);
-  color: var(--neon-blue);
-  box-shadow: 0 0 10px rgba(0, 243, 255, 0.2);
+  background: rgba(0, 243, 255, 0.08);
+  color: #e7f8ff;
+  box-shadow: 0 0 0 1px rgba(0, 243, 255, 0.1), 0 0 20px rgba(0, 243, 255, 0.22);
 }
 @media (max-width: 768px) {
   .device-toggle-container { display: none !important; }
