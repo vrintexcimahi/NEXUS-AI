@@ -14,11 +14,11 @@
     <link rel="icon" type="image/png" sizes="256x256" href="./extracted_icons/icon256.png" />
     <link rel="icon" type="image/png" sizes="500x500" href="./extracted_icons/icon500.png" />
     
-    <link rel="stylesheet" href="css/style.css?v=nexus_incremental_20260430h" />
+    <link rel="stylesheet" href="css/style.css?v=nexus_incremental_20260430i" />
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
-    <script src="js/update-core.js?v=nexus_incremental_20260430h" defer></script>
-    <script src="js/script.js?v=nexus_incremental_20260430h" defer></script>
+    <script src="js/update-core.js?v=nexus_incremental_20260430i" defer></script>
+    <script src="js/script.js?v=nexus_incremental_20260430i" defer></script>
   </head>
   <body>
     <!-- Context Menu for Chat History -->
@@ -556,15 +556,15 @@
     </div>
 
     <!-- PWA Custom Install Prompt -->
-    <div id="pwaInstallPrompt" class="pwa-install-prompt" style="display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px; background: rgba(10, 10, 10, 0.95); border: 1px solid var(--neon-blue); border-radius: 15px; padding: 15px; z-index: 10002; box-shadow: 0 0 20px rgba(0, 243, 255, 0.3); backdrop-filter: blur(10px); display: none; align-items: center; gap: 15px;">
-      <img src="./extracted_icons/icon128.png" alt="NEXUS Icon" style="width: 50px; height: 50px; border-radius: 10px;">
+    <div id="pwaInstallPrompt" class="pwa-install-prompt" style="display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 85%; max-width: 260px; background: rgba(10, 10, 10, 0.95); border: 1px solid var(--neon-blue); border-radius: 12px; padding: 8px 12px; z-index: 10002; box-shadow: 0 0 15px rgba(0, 243, 255, 0.3); backdrop-filter: blur(10px); align-items: center; gap: 10px;">
+      <img src="./extracted_icons/icon128.png" alt="NEXUS Icon" style="width: 32px; height: 32px; border-radius: 8px;">
       <div style="flex: 1;">
-        <h4 style="margin: 0; color: #fff; font-size: 1rem; font-weight: 600;">Install N.E.X.U.S</h4>
-        <p style="margin: 3px 0 0; color: var(--text-muted); font-size: 0.75rem;">Akses cepat tanpa buka browser</p>
+        <h4 style="margin: 0; color: #fff; font-size: 0.85rem; font-weight: 600;">Install N.E.X.U.S</h4>
+        <p style="margin: 2px 0 0; color: var(--text-muted); font-size: 0.65rem;">Akses cepat tanpa buka browser</p>
       </div>
-      <div style="display: flex; gap: 10px; align-items: center;">
-        <span onclick="dismissPwaPrompt()" style="color: var(--text-muted); font-size: 0.8rem; cursor: pointer;">Nanti</span>
-        <button onclick="installPwa()" class="btn primary" style="padding: 8px 15px; font-size: 0.85rem; background: var(--neon-blue); color: #000; font-weight: bold; border-radius: 8px; border: none;">Install</button>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span onclick="dismissPwaPrompt()" style="color: var(--text-muted); font-size: 0.7rem; cursor: pointer;">Nanti</span>
+        <button onclick="installPwa()" class="btn primary" style="padding: 4px 10px; font-size: 0.75rem; background: var(--neon-blue); color: #000; font-weight: bold; border-radius: 6px; border: none;">Install</button>
       </div>
     </div>
 
