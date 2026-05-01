@@ -2685,12 +2685,20 @@ function initMatrixRain() {
     let drops = [];
     const fontSize = 14;
     function resize() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      // Use container's actual dimensions if available to prevent squished text in mobile view
+      canvas.width = canvas.offsetWidth > 0 ? canvas.offsetWidth : window.innerWidth;
+      canvas.height = canvas.offsetHeight > 0 ? canvas.offsetHeight : window.innerHeight;
       drops = Array(Math.floor(canvas.width/fontSize)).fill(1);
     }
     resize();
     window.addEventListener("resize", resize);
+    
+    // MutationObserver to catch when the device view changes and the container resizes
+    const observer = new MutationObserver(resize);
+    if(canvas.parentElement) {
+      observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    }
+
     setInterval(() => {
       ctx.fillStyle = "rgba(0,0,0,0.05)";
       ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -2702,7 +2710,7 @@ function initMatrixRain() {
         if(y*fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
         drops[i]++;
       });
-    }, 33); // 33ms interval for smoother 30 FPS animation
+    }, 45); // Slower interval (45ms) to slow down speed by ~25%
   });
 }
 
