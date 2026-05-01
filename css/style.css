@@ -128,13 +128,13 @@ a { text-decoration: none; color: inherit; }
   border-radius: 10px;
   box-shadow: 0 0 10px var(--neon-blue);
 }
-.message { max-width: 900px; width: 100%; margin: 10px auto; display: flex; gap: 15px; line-height: 1.6; animation: fadeIn 0.3s ease; align-items: flex-start; }
+.message { max-width: 900px; width: 100%; margin: 0 auto; display: flex; gap: 15px; line-height: 1.6; animation: fadeIn 0.3s ease; align-items: flex-start; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
 .user-msg { flex-direction: row-reverse; } /* Pesan User Rata Kanan */
 .ai-msg { flex-direction: row; } /* Pesan AI Rata Kiri */
 
-.system-msg { color: var(--neon-blue); font-family: var(--font-code); text-align: center; justify-content: center; max-width: 100%; text-shadow: 0 0 5px rgba(0, 243, 255, 0.4); margin: 20px 0; }
+.system-msg { color: var(--neon-blue); font-family: var(--font-code); text-align: center; justify-content: center; max-width: 100%; text-shadow: 0 0 5px rgba(0, 243, 255, 0.4); margin: 0; padding: 10px 0; }
 .msg-icon { width: 39px; height: 39px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px; box-shadow: var(--neon-glow); }
 .user-msg .msg-icon { background-color: var(--neon-blue); color: var(--bg-dark); }
 .ai-msg .msg-icon { background-color: transparent; border: 1px solid var(--neon-blue); color: var(--neon-blue); }
@@ -791,6 +791,184 @@ a { text-decoration: none; color: inherit; }
 .user-table th { background: rgba(0, 243, 255, 0.1); padding: 8px 12px; color: var(--neon-blue); font-weight: 500; }
 .user-table td { padding: 6px 12px; border-bottom: 1px solid rgba(0, 243, 255, 0.05); color: var(--text-main); }
 .user-table tr:hover { background: rgba(0, 243, 255, 0.05); }
+.jailbreak-fullscreen-modal {
+  width: 96vw;
+  height: 94vh;
+  max-width: none;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+}
+.jailbreak-fullscreen-textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  font-family: var(--font-code);
+  font-size: 0.85rem;
+  padding: 15px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.loxer-user-toolbar,
+.loxer-pagination {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.72);
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.loxer-user-toolbar-head,
+.loxer-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.loxer-user-toolbar h4 {
+  margin: 0;
+  color: var(--text-main);
+  font-size: 0.9rem;
+}
+.loxer-add-admin-btn {
+  border-color: rgba(0, 243, 255, 0.35);
+  border-radius: 7px;
+}
+.loxer-user-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) minmax(150px, 1fr) minmax(150px, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+.loxer-search-box {
+  position: relative;
+}
+.loxer-search-box i {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.loxer-search-box .login-input {
+  padding-left: 36px;
+}
+.loxer-user-table-wrap {
+  overflow-x: auto;
+  border-color: rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.62);
+}
+.loxer-user-table {
+  min-width: 860px;
+}
+.loxer-user-table th {
+  background: rgba(30, 41, 59, 0.86);
+  color: #93a4bb;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+.loxer-user-name {
+  color: #fff;
+  font-weight: 700;
+}
+.loxer-user-sub,
+.loxer-credential {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+.loxer-truncate {
+  display: block;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.loxer-role-badge,
+.loxer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+.loxer-role-badge.admin {
+  border: 1px solid rgba(0, 243, 255, 0.35);
+  background: rgba(0, 243, 255, 0.12);
+  color: var(--neon-blue);
+}
+.loxer-role-badge.user {
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  background: rgba(37, 99, 235, 0.16);
+  color: #bfdbfe;
+}
+.loxer-status.active {
+  background: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+}
+.loxer-status.suspended {
+  background: rgba(239, 68, 68, 0.16);
+  color: #fca5a5;
+}
+.loxer-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.loxer-action-row button {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text-main);
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.loxer-action-row button:hover:not(:disabled) {
+  border-color: var(--neon-blue);
+  color: var(--neon-blue);
+}
+.loxer-action-row button.danger-soft,
+.loxer-action-row button.danger {
+  border-color: rgba(248, 113, 113, 0.38);
+  color: #fca5a5;
+}
+.loxer-action-row button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.user-detail-modal {
+  width: min(760px, 94vw);
+  max-height: 90vh;
+}
+.user-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.user-detail-item {
+  border: 1px solid rgba(0, 243, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  padding: 10px;
+}
+.user-detail-item span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  margin-bottom: 5px;
+}
+.user-detail-item b {
+  color: var(--text-main);
+  font-size: 0.8rem;
+  word-break: break-word;
+}
+@media (max-width: 780px) {
+  .loxer-user-controls,
+  .user-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 .api-stats-grid {
   display: grid;

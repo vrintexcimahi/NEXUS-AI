@@ -14,11 +14,11 @@
     <link rel="icon" type="image/png" sizes="256x256" href="./extracted_icons/icon256.png" />
     <link rel="icon" type="image/png" sizes="500x500" href="./extracted_icons/icon500.png" />
     
-    <link rel="stylesheet" href="css/style.css?v=nexus_incremental_20260430k" />
+    <link rel="stylesheet" href="css/style.css?v=nexus_incremental_20260430l" />
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
-    <script src="js/update-core.js?v=nexus_incremental_20260430k" defer></script>
-    <script src="js/script.js?v=nexus_incremental_20260430k" defer></script>
+    <script src="js/update-core.js?v=nexus_incremental_20260430l" defer></script>
+    <script src="js/script.js?v=nexus_incremental_20260430l" defer></script>
   </head>
   <body>
     <!-- Context Menu for Chat History -->
@@ -355,7 +355,7 @@
 
     <!-- Jailbreak Full Page Editor Modal -->
     <div class="modal-overlay" id="jailbreakEditModal" style="z-index: 9999;">
-      <div class="modal-content glass-panel dashboard-modal" style="width: 95vw; height: 95vh; max-width: none; max-height: none; display: flex; flex-direction: column;">
+      <div class="modal-content glass-panel dashboard-modal jailbreak-fullscreen-modal">
         <h3 class="modal-title"><i class="fa-solid fa-user-ninja"></i> <span id="jailbreakModalTitle">EDIT JAILBREAK</span></h3>
         <div style="flex: 1; display: flex; flex-direction: column; gap: 15px; overflow: hidden;">
           <div class="setting-group" style="flex-shrink: 0;">
@@ -364,13 +364,23 @@
           </div>
           <div class="setting-group" style="flex: 1; display: flex; flex-direction: column;">
             <label>Full Jailbreak Directive Content</label>
-            <textarea id="jailbreakContentInput" class="login-input" style="flex: 1; resize: none; font-family: var(--font-code); font-size: 0.85rem; padding: 15px; white-space: pre-wrap; line-height: 1.5;" placeholder="Enter directive here..."></textarea>
+            <textarea id="jailbreakContentInput" class="login-input jailbreak-fullscreen-textarea" placeholder="Enter directive here..."></textarea>
           </div>
         </div>
         <div class="modal-actions" style="margin-top: 15px; flex-shrink: 0;">
           <input type="hidden" id="jailbreakEditId">
           <button class="btn" onclick="closeJailbreakModal()">Cancel</button>
           <button class="btn primary" onclick="saveJailbreakModal()">Save Core Override</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="userDetailModal" style="z-index: 9998;">
+      <div class="modal-content glass-panel user-detail-modal">
+        <h3 class="modal-title"><i class="fa-solid fa-circle-user"></i> USER DETAIL</h3>
+        <div id="userDetailContent" class="user-detail-grid"></div>
+        <div class="modal-actions">
+          <button class="btn" onclick="document.getElementById('userDetailModal').classList.remove('active')">Close</button>
         </div>
       </div>
     </div>
@@ -488,22 +498,51 @@
 
         <!-- User Manager Tab -->
         <div id="dash-users" class="dash-section admin-only-section">
-          <div class="table-wrapper">
-            <table class="user-table">
+          <div class="loxer-user-toolbar">
+            <div class="loxer-user-toolbar-head">
+              <h4>Manajemen Users</h4>
+              <button class="small-btn loxer-add-admin-btn" onclick="createAdminUser()"><i class="fa-solid fa-plus"></i> Tambah Admin</button>
+            </div>
+            <div class="loxer-user-controls">
+              <div class="loxer-search-box">
+                <i class="fa-solid fa-search"></i>
+                <input type="text" id="userManagerSearch" class="login-input" placeholder="Cari username / email / phone" oninput="renderUserManager()">
+              </div>
+              <select id="userRoleFilter" class="login-input" onchange="renderUserManager()">
+                <option value="all">Semua Role</option>
+                <option value="admin">Admin</option>
+                <option value="user">User</option>
+              </select>
+              <select id="userSortBy" class="login-input" onchange="renderUserManager()">
+                <option value="newest">Terbaru</option>
+                <option value="oldest">Terlama</option>
+                <option value="username">A-Z Username</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrapper loxer-user-table-wrap">
+            <table class="user-table loxer-user-table">
               <thead>
                 <tr>
-                  <th>Username</th>
+                  <th>#</th>
+                  <th>User</th>
+                  <th>Email</th>
+                  <th>Kredensial</th>
                   <th>Role</th>
-                  <th>Email / Phone</th>
-                  <th style="min-width:120px">Location (GPS)</th>
-                  <th>Password</th>
-                  <th>OS / Device</th>
-                  <th>Last Seen</th>
-                  <th style="text-align:right">Action</th>
+                  <th>Bergabung</th>
+                  <th>Status</th>
+                  <th>Aksi</th>
                 </tr>
               </thead>
               <tbody id="userTableBody"></tbody>
             </table>
+          </div>
+          <div class="loxer-pagination">
+            <span id="userManagerPageInfo">Halaman 1 / 1</span>
+            <div>
+              <button class="small-btn" onclick="changeUserPage(-1)"><i class="fa-solid fa-chevron-left"></i></button>
+              <button class="small-btn" onclick="changeUserPage(1)"><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
           </div>
         </div>
 
