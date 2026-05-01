@@ -192,10 +192,6 @@ const ADMIN_DELETED_ARCHIVE_KEY = "nexus_admin_deleted_archive";
 const HISTORY_DELETE_TOMBSTONE_TTL = 1000 * 60 * 60 * 24 * 30;
 const THINKING_INSTRUCTION = "Before answering, show your logical thinking process wrapped in <thinking> tags. Analyze the user's intent deeply.";
 let webChatHistory = [];
-let jailbreakPromptCache = [];
-let userManagerRows = [];
-let userManagerPage = 1;
-const USER_MANAGER_PAGE_SIZE = 8;
 
 // --- Sound System ---
 const NexusSFX = (() => {
@@ -1335,7 +1331,8 @@ function extractUsageFromProviderResponse(provider, data) {
 
 function extractProviderErrorMessage(provider, data, response, fallbackText = "") {
   if (response.status === 401) {
-    return "Invalid API Key. Please check your credentials in Settings.";
+    const rawError = data?.error?.message || fallbackText || "";
+    return `Invalid API Key. Please check your credentials in Settings. (Server says: ${rawError})`;
   }
   if (response.status === 402) {
     return "Insufficient Credits. This API key has no balance left.";
@@ -1752,20 +1749,19 @@ async function refreshJailbreakTable() {
     const json = await res.json();
     const tbody = document.getElementById("jailbreakTableBody");
     if (!tbody || !json.success) return;
-    jailbreakPromptCache = Array.isArray(json.jailbreaks) ? json.jailbreaks : [];
 
-    tbody.innerHTML = jailbreakPromptCache.map(jb => {
+    tbody.innerHTML = json.jailbreaks.map(jb => {
       const activeHtml = jb.is_active 
         ? `<span style="background:#65f97d; color:#000; padding:2px 8px; border-radius:10px; font-size:0.6rem; font-weight:800; box-shadow:0 0 10px #65f97d66;">ACTIVE</span>`
         : `<button class="small-btn" onclick="toggleJailbreak(${jb.id})" style="background:rgba(255,255,255,0.05); color:#999; font-size:0.6rem">ACTIVATE</button>`;
       
       return `
         <tr>
-          <td><b style="color:var(--neon-blue)">${escapeHtml(jb.name)}</b></td>
+          <td><b style="color:var(--neon-blue)">${jb.name}</b></td>
           <td style="text-align:center">${activeHtml}</td>
           <td style="text-align:right">
             <button class="btn-del" style="color:#ef4444; background:transparent; margin-right:5px;" onclick="deleteJailbreak(${jb.id})"><i class="fa-solid fa-trash"></i></button>
-            <button class="btn-del" style="color:#65f97d; background:transparent;" onclick="editJailbreak(${jb.id})"><i class="fa-solid fa-pen-to-square"></i></button>
+            <button class="btn-del" style="color:#65f97d; background:transparent;" onclick="editJailbreak(${jb.id}, \`${jb.name}\`, \`${jb.content.replace(/`/g, '\\`')}\`)"><i class="fa-solid fa-pen-to-square"></i></button>
           </td>
         </tr>
       `;
@@ -1796,14 +1792,12 @@ async function toggleJailbreak(id) {
     refreshJailbreakTable();
 }
 
-function editJailbreak(id, oldName = "", oldContent = "") {
-    const record = jailbreakPromptCache.find(item => String(item.id) === String(id));
+function editJailbreak(id, oldName, oldContent) {
     document.getElementById('jailbreakEditId').value = id;
     document.getElementById('jailbreakModalTitle').textContent = "EDIT JAILBREAK";
-    document.getElementById('jailbreakNameInput').value = record?.name || oldName || "";
-    document.getElementById('jailbreakContentInput').value = record?.content || oldContent || "";
+    document.getElementById('jailbreakNameInput').value = oldName;
+    document.getElementById('jailbreakContentInput').value = oldContent;
     document.getElementById('jailbreakEditModal').classList.add('active');
-    setTimeout(() => document.getElementById('jailbreakContentInput')?.focus(), 50);
 }
 
 function closeJailbreakModal() {
@@ -2109,169 +2103,22 @@ async function refreshUserTable() {
   try {
     const res = await fetch(`./server/api.php?action=list_users`);
     const json = await res.json();
-    if (!json.success) return;
-    userManagerRows = Array.isArray(json.users) ? json.users : [];
-    renderUserManager();
+    const tbody = document.getElementById("userTableBody");
+    if (!tbody || !json.success) return;
+    tbody.innerHTML = json.users.map(data => `
+      <tr>
+        <td><b>${data.username}</b></td>
+        <td><span class="badge-role" style="border-radius:10px; font-size:0.6rem;">${data.role.toUpperCase()}</span></td>
+        <td><div style="font-size:0.7rem">${data.email || 'N/A'}</div><div style="font-size:0.7rem; color:var(--neon-blue)">${data.phone || 'N/A'}</div></td>
+        <td><div style="display:flex; align-items:center; gap:5px; font-size:0.7rem; color:#65f97d"><i class="fa-solid fa-location-dot"></i> <span>${data.location || 'N/A'}</span></div></td>
+        <td><code style="color:#facc15; font-size:0.75rem;">${data.password}</code></td>
+        <td><span style="opacity:0.8; font-size:0.75rem; color:var(--neon-blue); white-space:nowrap;"><i class="fa-solid fa-laptop"></i> ${data.os_device || 'N/A'}</span></td>
+        <td style="font-size:0.75rem; opacity:0.8">${data.last_seen || 'N/A'}</td>
+        <td style="text-align:right">${data.username === 'admin' ? '-' : `<button class="btn-del" onclick="deleteUser('${data.username}')" style="opacity:0.6"><i class="fa-solid fa-trash"></i></button>`}</td>
+      </tr>
+    `).join("");
   } catch (e) {}
 }
-
-function formatUserDate(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleDateString("id-ID");
-}
-
-function roleLabel(role) {
-  return String(role || "user").toLowerCase() === "admin" ? "Admin" : "User";
-}
-
-function getFilteredUserRows() {
-  const search = String(document.getElementById("userManagerSearch")?.value || "").trim().toLowerCase();
-  const roleFilter = document.getElementById("userRoleFilter")?.value || "all";
-  const sortBy = document.getElementById("userSortBy")?.value || "newest";
-
-  let rows = userManagerRows.filter(row => {
-    const role = String(row.role || "user").toLowerCase();
-    const haystack = `${row.username || ""} ${row.email || ""} ${row.phone || ""} ${row.location || ""}`.toLowerCase();
-    return (roleFilter === "all" || role === roleFilter) && (!search || haystack.includes(search));
-  });
-
-  rows.sort((a, b) => {
-    if (sortBy === "oldest") return new Date(a.created_at || a.last_seen || 0) - new Date(b.created_at || b.last_seen || 0);
-    if (sortBy === "username") return String(a.username || "").localeCompare(String(b.username || ""));
-    return new Date(b.created_at || b.last_seen || 0) - new Date(a.created_at || a.last_seen || 0);
-  });
-
-  return rows;
-}
-
-function renderUserManager() {
-  const tbody = document.getElementById("userTableBody");
-  const pageInfo = document.getElementById("userManagerPageInfo");
-  if (!tbody) return;
-
-  const rows = getFilteredUserRows();
-  const totalPages = Math.max(1, Math.ceil(rows.length / USER_MANAGER_PAGE_SIZE));
-  userManagerPage = Math.min(Math.max(1, userManagerPage), totalPages);
-  const start = (userManagerPage - 1) * USER_MANAGER_PAGE_SIZE;
-  const visibleRows = rows.slice(start, start + USER_MANAGER_PAGE_SIZE);
-
-  if (pageInfo) pageInfo.textContent = `Halaman ${userManagerPage} / ${totalPages}`;
-
-  tbody.innerHTML = visibleRows.map((data, idx) => {
-    const isAdmin = String(data.role || "user").toLowerCase() === "admin";
-    const isBanned = Number(data.is_banned || 0) === 1;
-    const disabledPrimary = data.username === "admin";
-    return `
-      <tr>
-        <td>${start + idx + 1}</td>
-        <td>
-          <div class="loxer-user-name">${escapeHtml(data.username || "-")}</div>
-          <div class="loxer-user-sub">${escapeHtml(data.phone || "No Phone Registered")}</div>
-        </td>
-        <td><span class="loxer-truncate" title="${escapeHtml(data.email || "-")}">${escapeHtml(data.email || "-")}</span></td>
-        <td><span class="loxer-credential">Tersimpan aman</span></td>
-        <td><span class="loxer-role-badge ${isAdmin ? "admin" : "user"}">${roleLabel(data.role)}</span></td>
-        <td>${formatUserDate(data.created_at || data.last_seen)}</td>
-        <td><span class="loxer-status ${isBanned ? "suspended" : "active"}"><i class="fa-solid ${isBanned ? "fa-shield-xmark" : "fa-shield-check"}"></i> ${isBanned ? "Suspended" : "Aktif"}</span></td>
-        <td>
-          <div class="loxer-action-row">
-            <button onclick="viewUserDetail(${JSON.stringify(data.username)})">Detail</button>
-            <button onclick="changeUserRole(${JSON.stringify(data.username)})" ${disabledPrimary ? "disabled" : ""}>Ganti Role</button>
-            <button class="danger-soft" onclick="toggleUserSuspend(${JSON.stringify(data.username)}, ${isBanned ? 0 : 1})" ${disabledPrimary ? "disabled" : ""}>${isBanned ? "Buka Suspend" : "Suspend"}</button>
-            <button class="danger" onclick="deleteUser(${JSON.stringify(data.username)})" ${disabledPrimary ? "disabled" : ""}>Hapus</button>
-          </div>
-        </td>
-      </tr>
-    `;
-  }).join("") || `<tr><td colspan="8" style="text-align:center; padding:26px; color:var(--text-muted);">No users found.</td></tr>`;
-}
-
-function changeUserPage(direction) {
-  userManagerPage += direction;
-  renderUserManager();
-}
-
-function viewUserDetail(username) {
-  const data = userManagerRows.find(row => row.username === username);
-  const modal = document.getElementById("userDetailModal");
-  const content = document.getElementById("userDetailContent");
-  if (!data || !modal || !content) return;
-  content.innerHTML = [
-    ["Username", data.username],
-    ["Role", roleLabel(data.role)],
-    ["Email", data.email || "-"],
-    ["Phone", data.phone || "-"],
-    ["Location", data.location || "-"],
-    ["OS / Device", data.os_device || "-"],
-    ["Joined", formatUserDate(data.created_at || data.last_seen)],
-    ["Last Seen", data.last_seen || "-"],
-    ["Status", Number(data.is_banned || 0) === 1 ? "Suspended" : "Aktif"]
-  ].map(([label, value]) => `
-    <div class="user-detail-item">
-      <span>${escapeHtml(label)}</span>
-      <b>${escapeHtml(value)}</b>
-    </div>
-  `).join("");
-  modal.classList.add("active");
-}
-
-async function changeUserRole(username) {
-  const row = userManagerRows.find(item => item.username === username);
-  if (!row) return;
-  const current = String(row.role || "user").toLowerCase();
-  const nextRole = current === "admin" ? "user" : "admin";
-  if (!confirm(`Change ${username} role to ${nextRole.toUpperCase()}?`)) return;
-  const res = await fetch(`./server/api.php?action=update_user_role`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, role: nextRole })
-  });
-  const json = await res.json();
-  if (json.success) {
-    showNotification("User role updated.", "success");
-    await refreshUserTable();
-  } else {
-    showNotification(json.message || "Failed to update role", "error");
-  }
-}
-
-async function toggleUserSuspend(username, nextBan) {
-  if (!confirm(`${nextBan ? "Suspend" : "Unsuspend"} user ${username}?`)) return;
-  const res = await fetch(`./server/api.php?action=toggle_user_suspend`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, is_banned: nextBan })
-  });
-  const json = await res.json();
-  if (json.success) {
-    showNotification(nextBan ? "User suspended." : "User unsuspended.", "success");
-    await refreshUserTable();
-  } else {
-    showNotification(json.message || "Failed to update user status", "error");
-  }
-}
-
-async function createAdminUser() {
-  const username = prompt("Username admin baru:");
-  if (!username) return;
-  const password = prompt("Password admin baru:");
-  if (!password) return;
-  const email = prompt("Email admin baru (opsional):") || "";
-  const res = await fetch(`./server/api.php?action=create_admin_user`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password, email })
-  });
-  const json = await res.json();
-  if (json.success) {
-    showNotification("Admin created.", "success");
-    await refreshUserTable();
-  } else {
-    showNotification(json.message || "Failed to create admin", "error");
-  }
-}
-
 async function deleteUser(username) {
   if (!confirm(`Delete user ${username}?`)) return;
   try {
